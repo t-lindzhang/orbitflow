@@ -1,0 +1,9 @@
+.vscode/**
+node_modules/**
+src/**
+media/**.ts
+media/**.map
+esbuild.js
+tsconfig.json
+**/*.map
+Design Doc.md

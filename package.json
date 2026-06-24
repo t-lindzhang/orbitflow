@@ -1,0 +1,81 @@
+{
+  "name": "orbitflow",
+  "displayName": "OrbitFlow",
+  "description": "A cognitive continuity assistant that helps you maintain task context, recover unfinished work, and resume flow after interruptions.",
+  "version": "0.0.1",
+  "publisher": "orbitflow",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "orbitflow",
+          "title": "OrbitFlow",
+          "icon": "media/orbit.svg"
+        }
+      ]
+    },
+    "views": {
+      "orbitflow": [
+        {
+          "type": "webview",
+          "id": "orbitflow.treeView",
+          "name": "Memory Tree"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "orbitflow.captureNode",
+        "title": "OrbitFlow: Capture Current Context as Node",
+        "icon": "$(add)"
+      },
+      {
+        "command": "orbitflow.newTree",
+        "title": "OrbitFlow: New Tree"
+      },
+      {
+        "command": "orbitflow.clearAll",
+        "title": "OrbitFlow: Clear All Trees"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "orbitflow.captureNode",
+          "when": "view == orbitflow.treeView",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/d3-drag": "^3.0.7",
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.10",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0"
+  }
+}
