@@ -1,0 +1,120 @@
+{
+  "name": "orbitflow",
+  "displayName": "OrbitFlow",
+  "description": "A cognitive continuity assistant that helps you maintain task context, recover unfinished work, and resume flow after interruptions.",
+  "version": "0.0.1",
+  "publisher": "orbitflow",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "orbitflow",
+          "title": "OrbitFlow",
+          "icon": "media/orbit.svg"
+        }
+      ]
+    },
+    "views": {
+      "orbitflow": [
+        {
+          "type": "webview",
+          "id": "orbitflow.treeView",
+          "name": "Memory Tree"
+        },
+        {
+          "type": "webview",
+          "id": "orbitflow.listView",
+          "name": "Priorities"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "orbitflow.openGraph",
+        "title": "OrbitFlow: Open Memory Tree in Editor",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "orbitflow.reorganize",
+        "title": "OrbitFlow: Reorganize Tree into Subtrees",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "orbitflow.revert",
+        "title": "OrbitFlow: Revert to Previous Tree",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "orbitflow.generateTrees",
+        "title": "OrbitFlow: Generate New Memory Trees",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "orbitflow.clearAll",
+        "title": "OrbitFlow: Clear Memory Trees",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "orbitflow.openGraph",
+          "when": "view == orbitflow.treeView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "orbitflow.revert",
+          "when": "view == orbitflow.treeView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "orbitflow.generateTrees",
+          "when": "view == orbitflow.treeView",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "orbitflow.reorganize",
+          "when": "view == orbitflow.treeView",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "orbitflow.clearAll",
+          "when": "view == orbitflow.treeView",
+          "group": "1_actions@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/d3-drag": "^3.0.7",
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.10",
+    "@types/d3-zoom": "^3.0.8",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0"
+  }
+}

@@ -1,0 +1,296 @@
+:root {
+  --gap: 8px;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  overflow: hidden;
+}
+
+#toolbar {
+  position: absolute;
+  top: var(--gap);
+  right: var(--gap);
+  display: flex;
+  gap: var(--gap);
+  z-index: 2;
+}
+
+#toolbar button {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+#toolbar button:hover {
+  opacity: 1;
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+#canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+#graph {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+#graph:active {
+  cursor: grabbing;
+}
+
+#zoom-controls {
+  position: absolute;
+  bottom: var(--gap);
+  left: var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 2;
+}
+
+#zoom-controls button {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+#zoom-controls button:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+#empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  pointer-events: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.link {
+  fill: none;
+  stroke-width: 3px;
+  stroke-linecap: round;
+  opacity: 0.95;
+}
+
+.edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16px;
+  cursor: pointer;
+}
+
+.edge.hover .link {
+  stroke-width: 4.5px;
+  opacity: 1;
+}
+
+.prune-btn {
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.edge.hover .prune-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.prune-btn circle {
+  fill: var(--vscode-errorForeground, #f14c4c);
+  stroke: var(--vscode-editorWidget-background);
+  stroke-width: 1.5px;
+}
+
+.prune-btn text {
+  fill: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.prune-btn:hover circle {
+  fill: #ff2d2d;
+}
+
+.node .label {
+  fill: var(--vscode-foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.node .sublabel {
+  fill: var(--vscode-descriptionForeground);
+  font-size: 9px;
+}
+
+.node .depth-num {
+  fill: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 2px;
+}
+
+.node.active circle,
+.node.active rect,
+.node.active polygon {
+  stroke: var(--vscode-focusBorder);
+  stroke-width: 2.5px;
+}
+
+.urgent-ring {
+  fill: none;
+  stroke: var(--vscode-errorForeground, #f14c4c);
+  stroke-width: 1.5px;
+  opacity: 0.8;
+}
+
+.priority-ring {
+  fill: none;
+  stroke: var(--vscode-focusBorder, #1f6feb);
+  stroke-width: 2px;
+  stroke-dasharray: 3 2;
+  opacity: 0.9;
+}
+
+.node.done circle,
+.node.done rect,
+.node.done polygon {
+  opacity: 0.4;
+}
+
+.node.done .label {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.node .check circle {
+  fill: #3fb950;
+  stroke: var(--vscode-editorWidget-background);
+  stroke-width: 1.5px;
+}
+
+.node .check text {
+  fill: #ffffff;
+  font-size: 8px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+#card {
+  position: absolute;
+  bottom: var(--gap);
+  left: var(--gap);
+  right: var(--gap);
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  max-height: 45%;
+  overflow: auto;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-title {
+  font-weight: 600;
+}
+
+.card-close {
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.card-meta {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  margin: 2px 0 6px;
+}
+
+.card-detail {
+  font-size: 12px;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.card-files {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.card-actions {
+  display: flex;
+  gap: var(--gap);
+}
+
+.card-actions button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.card-actions button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.card-actions button.danger {
+  background: transparent;
+  color: var(--vscode-errorForeground, #f14c4c);
+  border: 1px solid var(--vscode-errorForeground, #f14c4c);
+}
