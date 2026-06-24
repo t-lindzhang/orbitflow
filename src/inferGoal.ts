@@ -14,7 +14,7 @@ interface GitRepoLike {
     workingTreeChanges: { uri: vscode.Uri }[];
   };
   log(opts: { maxEntries: number }): Promise<{ message: string }[]>;
-  diffWithHEAD(): Promise<string>;
+  diffWithHEAD(path: string): Promise<string>;
 }
 
 export async function getGitRepo(): Promise<GitRepoLike | undefined> {

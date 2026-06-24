@@ -1,5 +1,7 @@
 export type NodeType = "task" | "session" | "idea";
 
+export type NodeStatus = "open" | "done";
+
 export interface ResumeContext {
   /** Files that were open, with optional cursor line for the active one. */
   files: { path: string; line?: number; active?: boolean }[];
@@ -16,9 +18,12 @@ export interface ThoughtNode {
   /** 0..1 — drives color saturation. */
   relevance: number;
   urgent: boolean;
+  status: NodeStatus;
   lastActiveAt: number;
   detail: string;
   snapshot: ResumeContext;
+  /** Stable external id (e.g. a Copilot session file) for dedup/update. */
+  sourceId?: string;
 }
 
 export interface Tree {
@@ -41,9 +46,22 @@ export type InboundMessage =
   | { type: "ready" }
   | { type: "resume"; nodeId: string }
   | { type: "delete"; nodeId: string }
+  | { type: "pruneSubtree"; nodeId: string }
+  | { type: "toggleDone"; nodeId: string }
   | { type: "select"; nodeId: string }
-  | { type: "newTree" }
-  | { type: "captureNode" };
+  | { type: "revert" }
+  | { type: "generateTrees" }
+  | { type: "reorganize" }
+  | { type: "clearAll" }
+  | { type: "openGraph" };
 
 /** Messages: extension -> webview */
-export type OutboundMessage = { type: "state"; state: OrbitState };
+export interface PriorityItem {
+  id: string;
+  reason: string;
+}
+export type OutboundMessage = {
+  type: "state";
+  state: OrbitState;
+  priority: PriorityItem[];
+};
