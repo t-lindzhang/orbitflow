@@ -42,7 +42,7 @@ function SidebarApp() {
 
       <div className="sidebar-section">
         <h3 className="section-title">Priorities</h3>
-        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} compact
+        <PriorityList state={state} onSelectNode={handleReveal} onResume={handleResume} compact
           savedTasks={userTasks} onTasksChange={saveUserTasks} />
       </div>
     </div>

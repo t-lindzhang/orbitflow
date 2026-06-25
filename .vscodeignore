@@ -4,6 +4,7 @@ src/**
 esbuild.js
 tsconfig.json
 **/*.map
+media/main.js
 Design Doc.md
 
 # webview-ui: only the built bundles in webview-ui/dist are shipped
