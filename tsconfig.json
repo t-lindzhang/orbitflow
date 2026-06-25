@@ -12,6 +12,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "media"],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

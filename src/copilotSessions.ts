@@ -18,8 +18,6 @@ export interface SessionInfo {
   isExploratory: boolean;
   /** Concatenated user prompts, used to relate the chat to an existing task. */
   questionText: string;
-  /** Title for the spawned idea node — the first question-like prompt. */
-  ideaTitle?: string;
 }
 
 export type UpsertSession = (info: SessionInfo) => Promise<void>;
@@ -226,29 +224,92 @@ export class CopilotSessionService implements vscode.Disposable {
       const texts = requests
         .map((r) => this.requestText(r))
         .filter((t) => t.length > 0);
-      const firstText = texts[0] ?? "";
-      const title =
-        typeof customTitle === "string" && customTitle.trim()
-          ? customTitle.trim()
-          : this.toTitle(firstText) || "Chat Session";
-      const detail = `${requests.length} request(s)${
-        firstText ? ` · “${firstText.slice(0, 80)}”` : ""
-      }`;
+
+      // The persisted session title is usually a stale first prompt, so we
+      // re-summarize from all prompts into a short title + real description.
+      const summary = await this.summarize(texts, customTitle);
 
       const sourceId = `chat:${uri.path.split("/").pop() ?? uri.path}`;
-      const questionPrompt = texts.find((t) => this.isQuestionLike(t));
       return {
         sourceId,
-        title: title.slice(0, 60),
-        detail,
+        title: summary.title.slice(0, 60),
+        detail: summary.description.slice(0, 200),
         isExploratory: this.isExploratory(texts),
         questionText: texts.join(" • ").slice(0, 400),
-        ideaTitle: questionPrompt
-          ? this.toTitle(questionPrompt)
-          : undefined,
       };
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Ask the language model for a concise (<=5 word) title and a one-sentence
+   * description summarizing what the chat is about. Falls back to a heuristic
+   * derived from the first prompt / persisted title when no model is available.
+   */
+  private async summarize(
+    texts: string[],
+    customTitle?: string
+  ): Promise<{ title: string; description: string }> {
+    const fallback = {
+      title:
+        this.toTitle(texts[0] ?? customTitle ?? "") ||
+        (customTitle?.trim() ? this.toTitle(customTitle) : "") ||
+        "Chat Session",
+      description: texts[0]
+        ? texts[0].slice(0, 140)
+        : "Copilot chat session.",
+    };
+    const joined = texts.join("\n").slice(0, 2000);
+    if (!joined.trim()) {
+      return fallback;
+    }
+    try {
+      const [model] = await vscode.lm.selectChatModels({ vendor: "copilot" });
+      if (!model) {
+        return fallback;
+      }
+      const prompt = [
+        "Summarize this Copilot chat for a to-do board card.",
+        "Return ONLY a JSON object, no prose:",
+        '{ "title": string (<=5 words, Title Case, names the work or topic),',
+        '  "description": string (one short sentence) }',
+        "The title must describe the SUBJECT of the chat, NOT be a generic",
+        'label or a verbatim old prompt. GOOD: "Fix Edge Pruning",',
+        '"Explore Tree Layout". BAD: "Chat Session", "Help Me".',
+        "",
+        "Chat prompts (most recent last):",
+        joined,
+      ].join("\n");
+      const source = new vscode.CancellationTokenSource();
+      const response = await model.sendRequest(
+        [vscode.LanguageModelChatMessage.User(prompt)],
+        {},
+        source.token
+      );
+      let raw = "";
+      for await (const chunk of response.text) {
+        raw += chunk;
+      }
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) {
+        return fallback;
+      }
+      const parsed = JSON.parse(match[0]) as {
+        title?: unknown;
+        description?: unknown;
+      };
+      const title =
+        typeof parsed.title === "string" && parsed.title.trim()
+          ? this.toTitle(parsed.title)
+          : fallback.title;
+      const description =
+        typeof parsed.description === "string" && parsed.description.trim()
+          ? parsed.description.trim()
+          : fallback.description;
+      return { title, description };
+    } catch {
+      return fallback;
     }
   }
 

@@ -360,11 +360,10 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Surface a Copilot chat session in the tree. The chat itself is a square
-   * "session" node at the root. When the chat turns exploratory (the developer
-   * starts asking questions), a triangular "idea" child node is spawned — under
-   * a related task if one matches, otherwise under the session node itself, so
-   * questions branch off the work they belong to.
+   * Surface a Copilot chat session in the tree as a SINGLE node. A normal
+   * working chat is a square "session" node; an exploratory/question-driven
+   * chat is a triangular "idea" node instead. A chat never produces both — the
+   * node's shape simply reflects what the chat currently looks like.
    */
   async upsertSessionNode(info: {
     sourceId: string;
@@ -372,7 +371,6 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     detail: string;
     isExploratory?: boolean;
     questionText?: string;
-    ideaTitle?: string;
   }): Promise<void> {
     let treeId = this.mainTreeId();
     if (!treeId) {
@@ -383,23 +381,35 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // 1. Upsert the session node (square) for this chat at the root.
-    let sessionNode = this.state.nodes.find(
+    // A chat's shape: exploratory chats are ideas (triangles), otherwise the
+    // chat is tracked as a session (square).
+    const desiredType: NodeType = info.isExploratory ? "idea" : "session";
+
+    // Remove any legacy separate "idea" child previously spawned for this chat,
+    // so older state collapses back to a single node per session.
+    const legacyIdeaId = `${info.sourceId}#idea`;
+    this.state.nodes = this.state.nodes.filter(
+      (n) => !(n.sourceId === legacyIdeaId && n.treeId === treeId)
+    );
+
+    // Upsert the single node for this chat at the root.
+    const existing = this.state.nodes.find(
       (n) => n.sourceId === info.sourceId && n.treeId === treeId
     );
-    if (sessionNode) {
-      sessionNode.title = info.title;
-      sessionNode.detail = info.detail;
-      sessionNode.lastActiveAt = Date.now();
+    if (existing) {
+      existing.title = info.title;
+      existing.detail = info.detail;
+      existing.type = desiredType;
+      existing.lastActiveAt = Date.now();
     } else {
       const parentId = this.rootOf(treeId);
       const depth = parentId ? this.depthOf(parentId) + 1 : 0;
-      sessionNode = {
+      this.state.nodes.push({
         id: genId(),
         treeId,
         parentId,
         title: info.title,
-        type: "session",
+        type: desiredType,
         relevance: Math.max(0.25, 1 - depth * 0.15),
         urgent: false,
         status: "open",
@@ -407,42 +417,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         detail: info.detail,
         snapshot: this.capture.snapshot(),
         sourceId: info.sourceId,
-      };
-      this.state.nodes.push(sessionNode);
-    }
-
-    // 2. If the chat is exploratory, branch an "idea" child directly off its
-    //    own session node — questions asked in a chat belong to that chat.
-    if (info.isExploratory) {
-      const ideaSourceId = `${info.sourceId}#idea`;
-      const existingIdea = this.state.nodes.find(
-        (n) => n.sourceId === ideaSourceId && n.treeId === treeId
-      );
-      const parentId = sessionNode.id;
-      const ideaTitle = (info.ideaTitle || info.title).slice(0, 60);
-
-      if (existingIdea) {
-        existingIdea.title = ideaTitle;
-        existingIdea.detail = info.detail;
-        existingIdea.lastActiveAt = Date.now();
-        existingIdea.parentId = parentId;
-      } else {
-        const depth = this.depthOf(parentId) + 1;
-        this.state.nodes.push({
-          id: genId(),
-          treeId,
-          parentId,
-          title: ideaTitle,
-          type: "idea",
-          relevance: Math.max(0.25, 1 - depth * 0.15),
-          urgent: false,
-          status: "open",
-          lastActiveAt: Date.now(),
-          detail: info.detail,
-          snapshot: this.capture.snapshot(),
-          sourceId: ideaSourceId,
-        });
-      }
+      });
     }
 
     this.normalizeAllTrees();

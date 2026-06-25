@@ -1,0 +1,6 @@
+# Build artifacts in webview-ui/dist are generated with LF endings.
+# Pin them to LF so git doesn't try to convert to CRLF (avoids safecrlf errors).
+webview-ui/dist/** text eol=lf
+
+# This file itself uses LF.
+.gitattributes text eol=lf

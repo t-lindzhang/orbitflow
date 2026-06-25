@@ -309,6 +309,9 @@ function PreviewCard({ node }: { node: PositionedNode }) {
         <span className="meta-item">🕐 {timeAgo}</span>
         <span className="meta-item">{typeLabel}</span>
       </div>
+      {node.task.detail && (
+        <div className="card-description">{node.task.detail}</div>
+      )}
       <div className="card-files">
         {node.task.files.length > 0
           ? node.task.files.slice(0, 3).map((f, i) => (

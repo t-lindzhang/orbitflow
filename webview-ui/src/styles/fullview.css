@@ -274,6 +274,14 @@ g:hover > .prune-btn {
   gap: 12px;
 }
 
+.card-description {
+  padding: 8px 12px;
+  color: #ccc;
+  font-size: 11px;
+  line-height: 1.4;
+  border-bottom: 1px solid #2a2a4a;
+}
+
 .meta-item {
   display: flex;
   align-items: center;

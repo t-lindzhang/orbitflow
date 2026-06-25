@@ -17,6 +17,7 @@ interface LayoutNode {
   startedAt: number;
   nodeType: NodeType;
   relevance: number;
+  detail: string;
 }
 
 function NodeShape({ cx, cy, nodeType, state, isActive, stroke, fill }: {
@@ -130,6 +131,9 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
             </span>
           </div>
           <div className="mini-preview-time">🕐 {getTimeAgo(hovered.startedAt)}</div>
+          {hovered.detail && (
+            <div className="mini-preview-desc">{hovered.detail}</div>
+          )}
           <div className="mini-preview-files">
             {hovered.files.slice(0, 2).map((f, i) => (
               <span key={i} className="mini-file-tag">{getFileName(f)}</span>
@@ -171,6 +175,7 @@ function layoutMiniTree(state: FocusTreeState): LayoutNode[] {
       startedAt: node.startedAt,
       nodeType: task?.nodeType || 'task',
       relevance: task?.relevance ?? 0.5,
+      detail: task?.detail || '',
     });
 
     let offset = left;
