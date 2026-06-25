@@ -29,12 +29,7 @@
         {
           "type": "webview",
           "id": "orbitflow.treeView",
-          "name": "Memory Tree"
-        },
-        {
-          "type": "webview",
-          "id": "orbitflow.listView",
-          "name": "Priorities"
+          "name": "OrbitFlow"
         }
       ]
     },

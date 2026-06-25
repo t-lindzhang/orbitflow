@@ -48,7 +48,8 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     const kind =
       webviewView.viewType === "orbitflow.listView" ? "list" : "tree";
-    this.registerWebview(webviewView.webview, false, kind);
+    // Both views use our React sidebar UI (which includes tree + priority)
+    this.registerWebview(webviewView.webview, false, "tree");
     webviewView.onDidDispose(() =>
       this.webviews.delete(webviewView.webview)
     );
@@ -87,7 +88,10 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   ): void {
     webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri],
+      localResourceRoots: [
+        this.context.extensionUri,
+        vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist"),
+      ],
     };
     webview.html =
       kind === "list"
@@ -252,9 +256,18 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     let added = 0;
 
     for (const cluster of clusters) {
-      const key = cluster.title.toLowerCase();
-      if (titleToId.has(key)) {
-        continue; // duplicate title already in tree
+      const key = cluster.title.toLowerCase().trim();
+
+      // Check for existing node with same or very similar title
+      const existingId = titleToId.get(key) ?? this.findSimilarNode(treeId, key, titleToId);
+      if (existingId) {
+        // Update the existing node's lastActiveAt instead of creating a duplicate
+        const existing = this.state.nodes.find(n => n.id === existingId);
+        if (existing) {
+          existing.lastActiveAt = Date.now();
+          existing.snapshot = this.capture.snapshot();
+        }
+        continue;
       }
 
       const parentKey = cluster.parent.trim().toLowerCase();
@@ -532,6 +545,33 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     return depth;
   }
 
+  /** Find an existing node with a similar title (fuzzy match). */
+  private findSimilarNode(
+    treeId: string,
+    key: string,
+    titleToId: Map<string, string>
+  ): string | null {
+    // Check if the key is a substring of any existing title or vice versa
+    for (const [existingKey, id] of titleToId) {
+      const node = this.state.nodes.find(n => n.id === id);
+      if (!node || node.treeId !== treeId) continue;
+
+      // Exact match (already handled, but just in case)
+      if (existingKey === key) return id;
+
+      // One contains the other (e.g., "Merge PR" matches "Merge PR 1552780")
+      if (existingKey.includes(key) || key.includes(existingKey)) return id;
+
+      // High word overlap (>= 60% of words shared)
+      const wordsA = new Set(key.split(/\s+/));
+      const wordsB = new Set(existingKey.split(/\s+/));
+      const intersection = [...wordsA].filter(w => wordsB.has(w));
+      const similarity = intersection.length / Math.max(wordsA.size, wordsB.size);
+      if (similarity >= 0.6) return id;
+    }
+    return null;
+  }
+
   private async resume(nodeId: string): Promise<void> {
     const node = this.state.nodes.find((n) => n.id === nodeId);
     if (!node) {
@@ -726,25 +766,23 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
 
   private getHtml(webview: vscode.Webview, isPanel: boolean): string {
     const nonce = genId();
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js")
-    );
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, "media", "style.css")
-    );
-    const csp = [
-      `default-src 'none'`,
-      `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src 'nonce-${nonce}'`,
-      `font-src ${webview.cspSource}`,
-    ].join("; ");
 
-    // The editor tab omits "open in editor" — it's already in the editor.
-    const openButton = isPanel
-      ? ""
-      : `<button id="btn-open" title="Open in editor tab">⧉</button>`;
+    if (!isPanel) {
+      // Sidebar: use our React compact tree UI
+      const scriptUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist", "sidebar.js")
+      );
+      const styleUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist", "sidebar.css")
+      );
+      const csp = [
+        `default-src 'none'`,
+        `style-src ${webview.cspSource} 'unsafe-inline'`,
+        `script-src 'nonce-${nonce}'`,
+        `font-src ${webview.cspSource}`,
+      ].join("; ");
 
-    return /* html */ `<!DOCTYPE html>
+      return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -754,26 +792,37 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   <title>OrbitFlow</title>
 </head>
 <body>
-  <div id="toolbar">
-    ${openButton}
-    <button id="btn-revert" title="Revert to previous tree">↶</button>
-    <button id="btn-generate" title="Generate new memory trees">⟳</button>
-    <button id="btn-reorganize" title="Reorganize into subtrees">⤸</button>
-    <button id="btn-clear" title="Clear memory trees">🗑</button>
-  </div>
-  <div id="empty" class="hidden">
-    <p>Watching your work…</p>
-    <p>Nodes appear automatically as you change code.</p>
-  </div>
-  <div id="canvas">
-    <svg id="graph"></svg>
-  </div>
-  <div id="zoom-controls">
-    <button id="btn-zoom-in" title="Zoom in">+</button>
-    <button id="btn-zoom-reset" title="Reset zoom">⤢</button>
-    <button id="btn-zoom-out" title="Zoom out">−</button>
-  </div>
-  <div id="card" class="hidden"></div>
+  <div id="root"></div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+    }
+
+    // Editor panel: use our React full tree UI
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist", "fullview.js")
+    );
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist", "fullview.css")
+    );
+    const csp = [
+      `default-src 'none'`,
+      `style-src ${webview.cspSource} 'unsafe-inline'`,
+      `script-src 'nonce-${nonce}'`,
+      `font-src ${webview.cspSource}`,
+    ].join("; ");
+
+    return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="${styleUri}" rel="stylesheet" />
+  <title>OrbitFlow Memory Tree</title>
+</head>
+<body>
+  <div id="root"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
