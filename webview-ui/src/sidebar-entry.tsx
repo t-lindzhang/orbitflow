@@ -24,14 +24,6 @@ function SidebarApp() {
     sendMessage('addUserTask', { text });
   };
 
-  const handleToggleTask = (nodeId: string) => {
-    sendMessage('toggleDone', { nodeId });
-  };
-
-  const handleDeleteTask = (nodeId: string) => {
-    sendMessage('delete', { nodeId });
-  };
-
   return (
     <div className="sidebar-container">
       <div className="sidebar-section">
@@ -59,7 +51,7 @@ function SidebarApp() {
       <div className="sidebar-section">
         <h3 className="section-title">Priorities</h3>
         <PriorityList state={state} onSelectNode={handleReveal} onResume={handleResume} compact
-          onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} />
+          onAddTask={handleAddTask} />
       </div>
     </div>
   );

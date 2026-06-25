@@ -32,10 +32,6 @@ function FullViewApp() {
     sendMessage('addUserTask', { text });
   };
 
-  const handleToggleTask = (nodeId: string) => {
-    sendMessage('toggleDone', { nodeId });
-  };
-
   const handleEditNode = (nodeId: string, title?: string, detail?: string) => {
     sendMessage('editNode', { nodeId, title, detail });
   };
@@ -63,7 +59,7 @@ function FullViewApp() {
       <div className="fullview-checklist-panel">
         <h2 className="panel-title">Priorities</h2>
         <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume}
-          onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDelete} />
+          onAddTask={handleAddTask} />
       </div>
     </div>
   );

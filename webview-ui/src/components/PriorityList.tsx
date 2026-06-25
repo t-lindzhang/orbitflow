@@ -8,13 +8,9 @@ interface PriorityListProps {
   compact?: boolean;
   /** Add a user task (creates a synced task node in the tree). */
   onAddTask: (text: string) => void;
-  /** Toggle a task node done/open. */
-  onToggleTask: (nodeId: string) => void;
-  /** Delete a task node. */
-  onDeleteTask: (nodeId: string) => void;
 }
 
-export function PriorityList({ state, onSelectNode, onResume, compact = false, onAddTask, onToggleTask, onDeleteTask }: PriorityListProps) {
+export function PriorityList({ state, onSelectNode, onResume, compact = false, onAddTask }: PriorityListProps) {
   const [newItem, setNewItem] = useState('');
 
   const addItem = () => {
@@ -26,13 +22,6 @@ export function PriorityList({ state, onSelectNode, onResume, compact = false, o
 
   // System-computed priority items from OrbitFlow
   const priorityItems = state?.priority || [];
-
-  // User-added tasks are now first-class task nodes, identified by a `user:`
-  // source. Derive them from the synced tree state so checking/deleting here
-  // stays in lockstep with the tree view.
-  const userTasks = Object.values(state?.tasks || {}).filter(
-    (t) => t.sourceId?.startsWith('user:')
-  );
 
   return (
     <div className={`priority-list ${compact ? 'compact' : ''}`}>
@@ -76,26 +65,7 @@ export function PriorityList({ state, onSelectNode, onResume, compact = false, o
       )}
 
       {/* User-added tasks (synced task nodes) */}
-      {userTasks.length > 0 && (
-        <div className="priority-section">
-          <div className="priority-section-label">My Tasks</div>
-          {userTasks.map(task => (
-            <div key={task.id} className={`priority-item user ${task.done ? 'done' : ''}`}>
-              <input
-                type="checkbox"
-                checked={!!task.done}
-                onChange={() => onToggleTask(task.id)}
-              />
-              <span className="priority-name" onClick={() => onSelectNode(task.id)}>{task.name}</span>
-              {!compact && (
-                <button className="delete-btn" onClick={() => onDeleteTask(task.id)}>×</button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {priorityItems.length === 0 && userTasks.length === 0 && (
+      {priorityItems.length === 0 && (
         <div className="priority-empty">
           No priority items yet. Tasks will appear here as you work.
         </div>
