@@ -35,6 +35,9 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   private savedSnapshot: OrbitState;
   private static readonly MAX_HISTORY = 50;
 
+  /** In-flight bootstrap, so concurrent callers never create two trees. */
+  private bootstrapping?: Promise<void>;
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly storage: Storage,
@@ -149,8 +152,24 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   /**
    * On startup, automatically detect the current work tree, name it from the
    * inferred goal, and seed it with a root node — no user interaction.
+   *
+   * Concurrent callers (activation + chat-session detection) share a single
+   * in-flight run so we never create two trees for the same workspace.
    */
   async autoBootstrap(): Promise<void> {
+    if (this.bootstrapping) {
+      await this.bootstrapping;
+      return;
+    }
+    this.bootstrapping = this.doBootstrap();
+    try {
+      await this.bootstrapping;
+    } finally {
+      this.bootstrapping = undefined;
+    }
+  }
+
+  private async doBootstrap(): Promise<void> {
     if (this.state.trees.length > 0) {
       // Already initialised for this workspace — keep everything in one tree
       // and tidy up structure.
@@ -307,11 +326,20 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Surface a Copilot chat session as a square (session-type) node. */
+  /**
+   * Surface a Copilot chat session in the tree. The chat itself is a square
+   * "session" node at the root. When the chat turns exploratory (the developer
+   * starts asking questions), a triangular "idea" child node is spawned — under
+   * a related task if one matches, otherwise under the session node itself, so
+   * questions branch off the work they belong to.
+   */
   async upsertSessionNode(info: {
     sourceId: string;
     title: string;
     detail: string;
+    isExploratory?: boolean;
+    questionText?: string;
+    ideaTitle?: string;
   }): Promise<void> {
     let treeId = this.mainTreeId();
     if (!treeId) {
@@ -322,17 +350,18 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const existing = this.state.nodes.find(
+    // 1. Upsert the session node (square) for this chat at the root.
+    let sessionNode = this.state.nodes.find(
       (n) => n.sourceId === info.sourceId && n.treeId === treeId
     );
-    if (existing) {
-      existing.title = info.title;
-      existing.detail = info.detail;
-      existing.lastActiveAt = Date.now();
+    if (sessionNode) {
+      sessionNode.title = info.title;
+      sessionNode.detail = info.detail;
+      sessionNode.lastActiveAt = Date.now();
     } else {
       const parentId = this.rootOf(treeId);
       const depth = parentId ? this.depthOf(parentId) + 1 : 0;
-      this.state.nodes.push({
+      sessionNode = {
         id: genId(),
         treeId,
         parentId,
@@ -345,7 +374,42 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         detail: info.detail,
         snapshot: this.capture.snapshot(),
         sourceId: info.sourceId,
-      });
+      };
+      this.state.nodes.push(sessionNode);
+    }
+
+    // 2. If the chat is exploratory, branch an "idea" child directly off its
+    //    own session node — questions asked in a chat belong to that chat.
+    if (info.isExploratory) {
+      const ideaSourceId = `${info.sourceId}#idea`;
+      const existingIdea = this.state.nodes.find(
+        (n) => n.sourceId === ideaSourceId && n.treeId === treeId
+      );
+      const parentId = sessionNode.id;
+      const ideaTitle = (info.ideaTitle || info.title).slice(0, 60);
+
+      if (existingIdea) {
+        existingIdea.title = ideaTitle;
+        existingIdea.detail = info.detail;
+        existingIdea.lastActiveAt = Date.now();
+        existingIdea.parentId = parentId;
+      } else {
+        const depth = this.depthOf(parentId) + 1;
+        this.state.nodes.push({
+          id: genId(),
+          treeId,
+          parentId,
+          title: ideaTitle,
+          type: "idea",
+          relevance: Math.max(0.25, 1 - depth * 0.15),
+          urgent: false,
+          status: "open",
+          lastActiveAt: Date.now(),
+          detail: info.detail,
+          snapshot: this.capture.snapshot(),
+          sourceId: ideaSourceId,
+        });
+      }
     }
 
     this.normalizeAllTrees();
@@ -492,6 +556,11 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       for (const n of treeNodes) {
         if (!n.status) {
           n.status = "open";
+          changed = true;
+        }
+        // Heal self-referential parents (a node can't be its own parent).
+        if (n.parentId === n.id) {
+          n.parentId = null;
           changed = true;
         }
       }
