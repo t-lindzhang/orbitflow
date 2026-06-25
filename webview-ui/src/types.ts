@@ -16,6 +16,8 @@ export interface Task {
   totalTimeSpent: number;
   lastCodeSnapshot: CodeSnapshot | null;
   nodeType: NodeType;
+  urgent?: boolean;
+  relevance?: number; // 0-1, drives visual prominence
 }
 
 export interface TreeNode {
@@ -33,4 +35,11 @@ export interface FocusTreeState {
   nodes: Record<string, TreeNode>;
   rootNodeId: string | null;
   activeNodeId: string | null;
+  priority?: PriorityItem[];
+  baseColor?: string; // Tree's base color (e.g., "#c77dff")
+}
+
+export interface PriorityItem {
+  id: string;
+  reason: string;
 }

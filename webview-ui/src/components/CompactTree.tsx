@@ -16,39 +16,44 @@ interface LayoutNode {
   files: string[];
   startedAt: number;
   nodeType: NodeType;
+  relevance: number;
 }
 
-function NodeShape({ cx, cy, nodeType, state, isActive }: {
+function NodeShape({ cx, cy, nodeType, state, isActive, stroke, fill }: {
   cx: number; cy: number; nodeType: NodeType; state: string; isActive: boolean;
+  stroke: string; fill: string;
 }) {
   const r = isActive ? 10 : 7;
-  const className = `mini-node ${state}`;
+  const style = {
+    fill: isActive ? fill : '#1a1a2e',
+    stroke,
+    strokeWidth: 2.5,
+    filter: `drop-shadow(0 0 ${isActive ? 6 : 4}px ${stroke}80)`,
+  };
 
   switch (nodeType) {
     case 'session':
-      // Square (rounded rect)
       const size = r * 1.6;
-      return <rect
-        className={className}
+      return <rect style={style}
         x={cx - size / 2} y={cy - size / 2}
         width={size} height={size}
         rx={2} ry={2}
       />;
     case 'idea':
-      // Triangle
       const h = r * 1.8;
       const w = r * 1.6;
       const points = `${cx},${cy - h / 2} ${cx - w / 2},${cy + h / 2} ${cx + w / 2},${cy + h / 2}`;
-      return <polygon className={className} points={points} />;
+      return <polygon style={style} points={points} />;
     case 'task':
     default:
-      // Circle (default)
-      return <circle className={className} cx={cx} cy={cy} r={r} />;
+      return <circle style={style} cx={cx} cy={cy} r={r} />;
   }
 }
 
 export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
   const [hovered, setHovered] = useState<LayoutNode | null>(null);
+  const baseColor = state.baseColor || '#b44dff';
+  const complementary = getComplementaryColor(baseColor);
 
   if (!state.rootNodeId) {
     return <div className="empty-state">Start working to build your focus tree...</div>;
@@ -88,22 +93,31 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
         })}
 
         {/* Nodes — shape based on type */}
-        {nodes.map(n => (
-          <g
-            key={n.id}
-            onClick={() => onSelectNode(n.id)}
-            onMouseEnter={() => setHovered(n)}
-            onMouseLeave={() => setHovered(null)}
-            style={{ cursor: 'pointer' }}
-          >
-            <NodeShape
-              cx={n.x} cy={n.y}
-              nodeType={n.nodeType}
-              state={n.state}
-              isActive={n.state === 'active'}
-            />
-          </g>
-        ))}
+        {nodes.map(n => {
+          const isActive = n.state === 'active';
+          const relevance = n.relevance ?? 0.5;
+          const saturation = isActive ? 1 : 0.3 + relevance * 0.7;
+          const nodeColor = isActive ? complementary : baseColor;
+          const nodeFill = isActive ? complementary : '#1a1a2e';
+          return (
+            <g
+              key={n.id}
+              onClick={() => onSelectNode(n.id)}
+              onMouseEnter={() => setHovered(n)}
+              onMouseLeave={() => setHovered(null)}
+              style={{ cursor: 'pointer', filter: !isActive ? `saturate(${saturation})` : undefined }}
+            >
+              <NodeShape
+                cx={n.x} cy={n.y}
+                nodeType={n.nodeType}
+                state={n.state}
+                isActive={isActive}
+                stroke={nodeColor}
+                fill={nodeFill}
+              />
+            </g>
+          );
+        })}
       </svg>
 
       {/* Hover preview popup */}
@@ -156,6 +170,7 @@ function layoutMiniTree(state: FocusTreeState): LayoutNode[] {
       files: task?.files || [],
       startedAt: node.startedAt,
       nodeType: task?.nodeType || 'task',
+      relevance: task?.relevance ?? 0.5,
     });
 
     let offset = left;
@@ -181,4 +196,36 @@ function getTimeAgo(timestamp: number): string {
 
 function getFileName(filePath: string): string {
   return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
+}
+
+function getComplementaryColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+  h = (h + 0.5) % 1;
+  const hue2rgb = (p: number, q: number, t: number) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const rr = Math.round(hue2rgb(p, q, h + 1/3) * 255);
+  const gg = Math.round(hue2rgb(p, q, h) * 255);
+  const bb = Math.round(hue2rgb(p, q, h - 1/3) * 255);
+  return `#${rr.toString(16).padStart(2,'0')}${gg.toString(16).padStart(2,'0')}${bb.toString(16).padStart(2,'0')}`;
 }

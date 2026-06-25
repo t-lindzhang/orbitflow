@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { useVSCodeAPI } from './hooks/useVSCodeAPI';
 import { WorkingTree } from './components/WorkingTree';
-import { Checklist } from './components/Checklist';
+import { PriorityList } from './components/PriorityList';
 import './styles/fullview.css';
 
 function FullViewApp() {
@@ -12,12 +12,26 @@ function FullViewApp() {
     sendMessage('selectNode', { nodeId });
   };
 
+  const handleResume = (nodeId: string) => {
+    sendMessage('resume', { nodeId });
+  };
+
+  const handlePrune = (nodeId: string) => {
+    sendMessage('pruneSubtree', { nodeId });
+  };
+
   return (
     <div className="fullview-container">
       <div className="fullview-tree-panel">
-        <h2 className="panel-title">Working Tree</h2>
+        <div className="toolbar">
+          <h2 className="panel-title">Focus Tree</h2>
+          <div className="toolbar-actions">
+            <button onClick={() => sendMessage('revert')} title="Revert to previous tree">↶</button>
+            <button onClick={() => sendMessage('clearAll')} title="Clear memory trees">🗑</button>
+          </div>
+        </div>
         {state ? (
-          <WorkingTree state={state} onSelectNode={handleSelectNode} />
+          <WorkingTree state={state} onSelectNode={handleSelectNode} onResumeNode={handleResume} onPruneNode={handlePrune} />
         ) : (
           <div className="empty-state">Loading...</div>
         )}
@@ -26,8 +40,8 @@ function FullViewApp() {
       <div className="fullview-divider" />
 
       <div className="fullview-checklist-panel">
-        <h2 className="panel-title">Checklist</h2>
-        <Checklist />
+        <h2 className="panel-title">Priorities</h2>
+        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} />
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ body {
   flex-direction: column;
   padding: 16px;
   position: relative;
+  overflow: visible;
 }
 
 .fullview-divider {
@@ -41,6 +42,43 @@ body {
   font-weight: 800;
   text-align: center;
   margin-bottom: 12px;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.toolbar .panel-title {
+  margin-bottom: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-actions button {
+  width: 30px;
+  height: 30px;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  color: #aaa;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.toolbar-actions button:hover {
+  background: #3a3a5a;
+  color: #fff;
 }
 
 /* Working Tree */
@@ -77,6 +115,44 @@ body {
   fill: none;
 }
 
+/* Prune button on edge */
+.prune-btn {
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.prune-btn:hover {
+  opacity: 1 !important;
+}
+
+.tree-edge:hover ~ .prune-btn,
+g:hover > .prune-btn {
+  opacity: 0.5;
+}
+
+.prune-bg {
+  fill: #2a2a4a;
+  stroke: #666;
+  stroke-width: 1;
+}
+
+.prune-btn:hover .prune-bg {
+  fill: #3a2020;
+  stroke: #ff6b6b;
+}
+
+.prune-icon {
+  font-size: 9px;
+  text-anchor: middle;
+  fill: #aaa;
+  pointer-events: none;
+}
+
+.prune-btn:hover .prune-icon {
+  fill: #ff6b6b;
+}
+
 /* Nodes */
 .tree-node {
   cursor: pointer;
@@ -104,30 +180,49 @@ body {
 .tree-node.stale .node-ring {
   stroke: #6a3a8a;
   filter: drop-shadow(0 0 3px rgba(106, 58, 138, 0.3));
-  opacity: 0.6;
+}
+
+/* Urgent border — pulsing outer ring */
+.urgent-border {
+  fill: none;
+  stroke: #ff6b6b;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.6));
+  animation: urgentPulse 2s ease-in-out infinite;
+}
+
+@keyframes urgentPulse {
+  0%, 100% { opacity: 0.6; stroke-width: 2; }
+  50% { opacity: 1; stroke-width: 3; }
+}
+
+.tree-node.urgent .node-ring {
+  filter: drop-shadow(0 0 8px rgba(255, 107, 107, 0.4)), drop-shadow(0 0 6px rgba(180, 77, 255, 0.6));
 }
 
 .tree-node .node-label {
   fill: #aaa;
-  font-size: 9px;
+  font-size: 10px;
   text-anchor: middle;
   pointer-events: none;
-  opacity: 0.7;
+  dominant-baseline: hanging;
 }
 
 .tree-node.active .node-label {
   fill: #44ff88;
-  opacity: 1;
 }
 
 .tree-node:hover .node-label {
   fill: #fff;
-  opacity: 1;
 }
 
 /* Preview Card */
 .preview-card {
-  position: absolute;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   background: #1e1e3a;
   border: 1px solid #555;
   border-radius: 8px;
@@ -136,7 +231,7 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   pointer-events: none;
   animation: cardFadeIn 0.15s ease;
-  z-index: 10;
+  z-index: 100;
 }
 
 @keyframes cardFadeIn {
@@ -175,6 +270,14 @@ body {
   color: #888;
   font-size: 10px;
   border-bottom: 1px solid #2a2a4a;
+  display: flex;
+  gap: 12px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .card-files {
@@ -200,18 +303,143 @@ body {
   text-align: center;
 }
 
-/* Checklist (full view) */
-.checklist {
+/* Zoom Controls */
+.zoom-controls {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  display: flex;
+  gap: 2px;
+}
+
+.zoom-controls button {
+  width: 28px;
+  height: 28px;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-controls button:hover {
+  background: #3a3a5a;
+}
+
+/* Minimap */
+.minimap {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  width: 120px;
+  height: 80px;
+  background: rgba(26, 26, 46, 0.9);
+  border: 1px solid #444;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.minimap svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mm-node {
+  fill: #b44dff;
+  opacity: 0.6;
+}
+
+.mm-node.active {
+  fill: #44ff88;
+  opacity: 1;
+}
+
+.mm-edge {
+  stroke: #444;
+  stroke-width: 1;
+  fill: none;
+}
+
+/* Nudge (side-positioned) */
+.nudge-container {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 180px;
+  z-index: 5;
+}
+
+.nudge {
+  background: rgba(68, 255, 136, 0.08);
+  border: 1px solid rgba(68, 255, 136, 0.25);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 11px;
+  animation: nudgeFadeIn 0.5s ease;
+  line-height: 1.5;
+}
+
+.nudge .nudge-title {
+  color: #44ff88;
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+
+.nudge .nudge-depth {
+  color: #aaa;
+  margin-bottom: 6px;
+}
+
+.nudge button {
+  display: block;
+  width: 100%;
+  background: rgba(68, 255, 136, 0.15);
+  border: 1px solid rgba(68, 255, 136, 0.3);
+  color: #44ff88;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  margin-bottom: 4px;
+  pointer-events: auto;
+}
+
+.nudge button:hover {
+  background: rgba(68, 255, 136, 0.25);
+}
+
+.nudge button.dismiss {
+  background: transparent;
+  border-color: #444;
+  color: #666;
+}
+
+.nudge button.dismiss:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+@keyframes nudgeFadeIn {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; }
+}
+
+/* Priority List (full view) */
+.priority-list {
   padding: 8px;
 }
 
-.checklist-input {
+.priority-input {
   display: flex;
   gap: 6px;
   margin-bottom: 12px;
 }
 
-.checklist-input input {
+.priority-input input {
   flex: 1;
   background: #2a2a4a;
   border: 1px solid #444;
@@ -222,11 +450,11 @@ body {
   outline: none;
 }
 
-.checklist-input input:focus {
+.priority-input input:focus {
   border-color: #b44dff;
 }
 
-.checklist-input button {
+.priority-input button {
   background: #b44dff;
   color: #fff;
   border: none;
@@ -237,15 +465,24 @@ body {
   font-weight: bold;
 }
 
-.checklist-input button:hover {
+.priority-input button:hover {
   background: #9a3de0;
 }
 
-.checklist-items {
-  list-style: none;
+.priority-section {
+  margin-bottom: 16px;
 }
 
-.checklist-items li {
+.priority-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
+.priority-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -256,27 +493,74 @@ body {
   transition: background 0.15s;
 }
 
-.checklist-items li:hover {
+.priority-item:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.checklist-items li.done {
+.priority-item.done {
   opacity: 0.4;
 }
 
-.checklist-items li.done .item-text {
+.priority-item.done .priority-name {
   text-decoration: line-through;
 }
 
-.checklist-items li input[type="checkbox"] {
-  accent-color: #44ff88;
-  width: 16px;
-  height: 16px;
+.priority-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2.5px solid #b44dff;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px rgba(180, 77, 255, 0.4);
 }
 
-.item-text {
+.priority-dot.session {
+  border-radius: 2px;
+}
+
+.priority-dot.idea {
+  width: 0;
+  height: 0;
+  border: none;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 10px solid #b44dff;
+  box-shadow: none;
+}
+
+.priority-content {
   flex: 1;
-  font-size: 15px;
+  min-width: 0;
+}
+
+.priority-name {
+  display: block;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priority-reason {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.resume-btn {
+  background: none;
+  border: none;
+  color: #44ff88;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 4px 8px;
+}
+
+.priority-item:hover .resume-btn {
+  opacity: 1;
 }
 
 .delete-btn {
@@ -290,12 +574,25 @@ body {
   transition: opacity 0.15s;
 }
 
-.checklist-items li:hover .delete-btn {
+.priority-item:hover .delete-btn {
   opacity: 1;
 }
 
 .delete-btn:hover {
   color: #ff5555;
+}
+
+.priority-item input[type="checkbox"] {
+  accent-color: #44ff88;
+  width: 16px;
+  height: 16px;
+}
+
+.priority-empty {
+  color: #555;
+  text-align: center;
+  padding: 24px;
+  font-size: 13px;
 }
 
 .empty-state {
