@@ -34,7 +34,12 @@ export class CopilotSessionService implements vscode.Disposable {
   /** Last seen size+mtime per session file, to skip unchanged files on rescan. */
   private readonly fileStamps = new Map<string, string>();
 
-  private static readonly MAX_SEED = 10;
+  private static readonly MAX_SEED = 5;
+  /**
+   * Minimum combined prompt length for a chat to be worth surfacing. Shorter
+   * chats (a one-word prompt, a greeting) are throwaway and only add clutter.
+   */
+  private static readonly MIN_PROMPT_CHARS = 20;
   /**
    * How often to rescan the chat store. The store lives outside the workspace
    * folder, where VS Code's file watcher does not deliver content-change
@@ -224,6 +229,12 @@ export class CopilotSessionService implements vscode.Disposable {
       const texts = requests
         .map((r) => this.requestText(r))
         .filter((t) => t.length > 0);
+
+      // Skip insubstantial chats so the tree isn't cluttered with throwaway
+      // sessions (single greeting / one-word prompt).
+      if (texts.join(" ").trim().length < CopilotSessionService.MIN_PROMPT_CHARS) {
+        return undefined;
+      }
 
       // The persisted session title is usually a stale first prompt, so we
       // re-summarize from all prompts into a short title + real description.

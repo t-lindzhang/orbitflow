@@ -24,6 +24,16 @@ const TREE_COLORS = [
   "#36c9c6",
 ];
 
+/**
+ * Common words ignored when scoring how related a chat session is to an
+ * existing task node, so generic filler doesn't create false matches.
+ */
+const SESSION_STOPWORDS = new Set([
+  "the", "and", "for", "with", "this", "that", "from", "into", "how", "what",
+  "why", "when", "where", "which", "should", "could", "would", "can", "are",
+  "you", "your", "use", "using", "add", "fix", "make", "get", "set", "new",
+]);
+
 export class TreeViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "orbitflow.treeView";
 
@@ -392,7 +402,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       (n) => !(n.sourceId === legacyIdeaId && n.treeId === treeId)
     );
 
-    // Upsert the single node for this chat at the root.
+    // 1) The same chat we've already surfaced — update it in place.
     const existing = this.state.nodes.find(
       (n) => n.sourceId === info.sourceId && n.treeId === treeId
     );
@@ -401,27 +411,104 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       existing.detail = info.detail;
       existing.type = desiredType;
       existing.lastActiveAt = Date.now();
-    } else {
-      const parentId = this.rootOf(treeId);
-      const depth = parentId ? this.depthOf(parentId) + 1 : 0;
-      this.state.nodes.push({
-        id: genId(),
-        treeId,
-        parentId,
-        title: info.title,
-        type: desiredType,
-        relevance: Math.max(0.25, 1 - depth * 0.15),
-        urgent: false,
-        status: "open",
-        lastActiveAt: Date.now(),
-        detail: info.detail,
-        snapshot: this.capture.snapshot(),
-        sourceId: info.sourceId,
-      });
+      this.normalizeAllTrees();
+      await this.persist();
+      return;
     }
+
+    // 2) Dedup — a *different* chat that summarized to a near-identical title
+    // folds into the existing node rather than adding another level-1 sibling.
+    const key = info.title.toLowerCase().trim();
+    const chatTitles = new Map<string, string>();
+    for (const n of this.state.nodes) {
+      if (
+        n.treeId === treeId &&
+        (n.type === "session" || n.type === "idea") &&
+        n.sourceId?.startsWith("chat:")
+      ) {
+        chatTitles.set(n.title.toLowerCase(), n.id);
+      }
+    }
+    const dupId = chatTitles.get(key) ?? this.findSimilarNode(treeId, key, chatTitles);
+    if (dupId) {
+      const dup = this.state.nodes.find((n) => n.id === dupId);
+      if (dup) {
+        dup.detail = info.detail;
+        dup.lastActiveAt = Date.now();
+      }
+      this.normalizeAllTrees();
+      await this.persist();
+      return;
+    }
+
+    // 3) A genuinely new chat — nest it under the most relevant existing task
+    // node, falling back to the tree root when nothing is clearly related, so
+    // unrelated chats don't all pile onto level 1.
+    const parentId = this.relateSessionParent(
+      treeId,
+      `${info.title} ${info.questionText ?? info.detail}`
+    );
+    const depth = parentId ? this.depthOf(parentId) + 1 : 0;
+    this.state.nodes.push({
+      id: genId(),
+      treeId,
+      parentId,
+      title: info.title,
+      type: desiredType,
+      relevance: Math.max(0.25, 1 - depth * 0.15),
+      urgent: false,
+      status: "open",
+      lastActiveAt: Date.now(),
+      detail: info.detail,
+      snapshot: this.capture.snapshot(),
+      sourceId: info.sourceId,
+    });
 
     this.normalizeAllTrees();
     await this.persist();
+  }
+
+  /**
+   * Pick the most relevant existing *task* node to nest a chat session under,
+   * scored by word overlap between the chat's text and the node's
+   * title/detail. Returns the tree root when nothing is a clear match, so
+   * unrelated chats surface at the top rather than under an arbitrary task.
+   */
+  private relateSessionParent(treeId: string, text: string): string | null {
+    const root = this.rootOf(treeId);
+    const wordsOf = (s: string): Set<string> =>
+      new Set(
+        (s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter(
+          (w) => !SESSION_STOPWORDS.has(w)
+        )
+      );
+    const chatWords = wordsOf(text);
+    if (chatWords.size === 0) {
+      return root;
+    }
+
+    let best: { id: string; score: number } | null = null;
+    for (const n of this.state.nodes) {
+      if (n.treeId !== treeId || n.type !== "task" || n.id === root) {
+        continue;
+      }
+      if (this.depthOf(n.id) >= 3) {
+        continue; // keep the tree shallow
+      }
+      const nodeWords = wordsOf(`${n.title} ${n.detail ?? ""}`);
+      if (nodeWords.size === 0) {
+        continue;
+      }
+      const shared = [...chatWords].filter((w) => nodeWords.has(w)).length;
+      if (shared < 2) {
+        continue;
+      }
+      const score = shared / Math.min(chatWords.size, nodeWords.size);
+      if (score >= 0.2 && (!best || score > best.score)) {
+        best = { id: n.id, score };
+      }
+    }
+    return best?.id ?? root;
   }
 
   /** Re-cluster the active tree's existing nodes into sensible subtrees. */
