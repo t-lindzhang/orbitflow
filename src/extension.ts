@@ -5,6 +5,7 @@ import { TreeViewProvider } from "./treeViewProvider";
 import { AutoNodeService } from "./autoNode";
 import { CopilotSessionService } from "./copilotSessions";
 import { CommitCompletionService } from "./completion";
+import { AdoTaskService } from "./adoTasks";
 
 export function activate(context: vscode.ExtensionContext): void {
   const storage = new Storage(context.workspaceState);
@@ -35,11 +36,21 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   void completion.start();
 
+  const adoTasks = new AdoTaskService(
+    (info) => provider.upsertTaskNode(info),
+    (keep) => provider.pruneAdoTasks(keep),
+    (links) => provider.applyAdoHierarchy(links),
+    context.workspaceState,
+    log
+  );
+  void adoTasks.start();
+
   context.subscriptions.push(
     capture,
     autoNodes,
     copilotSessions,
     completion,
+    adoTasks,
     log,
     vscode.window.registerWebviewViewProvider(
       TreeViewProvider.viewType,
@@ -60,6 +71,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("orbitflow.clearAll", () =>
       provider.clearAll()
+    ),
+    vscode.commands.registerCommand("orbitflow.syncAdo", () =>
+      adoTasks.sync(true)
     )
   );
 }

@@ -68,7 +68,9 @@ export type InboundMessage =
   | { type: "clearAll" }
   | { type: "openGraph" }
   | { type: "saveUserTasks"; tasks: UserTask[] }
-  | { type: "loadUserTasks" };
+  | { type: "loadUserTasks" }
+  | { type: "addUserTask"; text: string }
+  | { type: "syncAdo" };
 
 export interface UserTask {
   id: string;

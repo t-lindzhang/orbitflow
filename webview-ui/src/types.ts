@@ -34,6 +34,8 @@ export interface Task {
   detail?: string; // one-sentence description shown on cards
   waiting?: boolean; // agent finished its turn and is awaiting a prompt
   awaitingChoice?: boolean; // agent's last message just asks you to pick/confirm
+  sourceId?: string; // stable external id (e.g. "user:..", "ado:..", "chat:..")
+  done?: boolean; // node status === 'done'
 }
 
 export interface TreeNode {

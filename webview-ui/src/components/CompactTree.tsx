@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FocusTreeState, TreeNode, NodeType } from '../types';
 
 interface CompactTreeProps {
@@ -54,8 +54,26 @@ function NodeShape({ cx, cy, nodeType, state, isActive, stroke, fill }: {
 
 export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
   const [hovered, setHovered] = useState<LayoutNode | null>(null);
+  const [pinned, setPinned] = useState<LayoutNode | null>(null);
   const baseColor = state.baseColor || '#b44dff';
   const complementary = getComplementaryColor(baseColor);
+
+  // A clicked node pins its preview; hovering only previews when nothing is
+  // pinned (mirrors the editor's sticky card taking precedence over hover).
+  const preview = pinned ?? hovered;
+
+  // Dismiss the pinned preview when clicking outside it and outside any node.
+  useEffect(() => {
+    if (!pinned) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target || (!target.closest('.mini-preview') && !target.closest('.mini-node'))) {
+        setPinned(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick, true);
+    return () => document.removeEventListener('mousedown', onDocClick, true);
+  }, [pinned]);
 
   if (!state.rootNodeId) {
     return <div className="empty-state">Start working to build your focus tree...</div>;
@@ -106,7 +124,7 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
             <g
               key={n.id}
               className={`mini-node ${needsAttention ? 'needs-attention' : ''}`}
-              onClick={() => onSelectNode(n.id)}
+              onClick={() => { onSelectNode(n.id); setPinned(n); }}
               onMouseEnter={() => setHovered(n)}
               onMouseLeave={() => setHovered(null)}
               style={{ cursor: 'pointer', filter: !isActive ? `saturate(${saturation})` : undefined }}
@@ -124,21 +142,21 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
         })}
       </svg>
 
-      {/* Hover preview popup */}
-      {hovered && (
+      {/* Hover / pinned preview popup */}
+      {preview && (
         <div className="mini-preview">
           <div className="mini-preview-header">
-            <span className="mini-preview-name">{hovered.name}</span>
-            <span className={`mini-preview-badge ${hovered.state}`}>
-              {hovered.state === 'active' ? 'Active' : hovered.state === 'stale' ? 'Stale' : 'Recent'}
+            <span className="mini-preview-name">{preview.name}</span>
+            <span className={`mini-preview-badge ${preview.state}`}>
+              {preview.state === 'active' ? 'Active' : preview.state === 'stale' ? 'Stale' : 'Recent'}
             </span>
           </div>
-          <div className="mini-preview-time">🕐 {getTimeAgo(hovered.startedAt)}</div>
-          {hovered.detail && (
-            <div className="mini-preview-desc">{hovered.detail}</div>
+          <div className="mini-preview-time">🕐 {getTimeAgo(preview.startedAt)}</div>
+          {preview.detail && (
+            <div className="mini-preview-desc">{preview.detail}</div>
           )}
           <div className="mini-preview-files">
-            {hovered.files.slice(0, 2).map((f, i) => (
+            {preview.files.slice(0, 2).map((f, i) => (
               <span key={i} className="mini-file-tag">{getFileName(f)}</span>
             ))}
           </div>

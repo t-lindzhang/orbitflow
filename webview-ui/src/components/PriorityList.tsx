@@ -1,55 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FocusTreeState, PriorityItem } from '../types';
-
-interface UserTask {
-  id: string;
-  text: string;
-  done: boolean;
-}
 
 interface PriorityListProps {
   state: FocusTreeState | null;
   onSelectNode: (nodeId: string) => void;
   onResume: (nodeId: string) => void;
   compact?: boolean;
-  savedTasks?: UserTask[];
-  onTasksChange?: (tasks: UserTask[]) => void;
+  /** Add a user task (creates a synced task node in the tree). */
+  onAddTask: (text: string) => void;
+  /** Toggle a task node done/open. */
+  onToggleTask: (nodeId: string) => void;
+  /** Delete a task node. */
+  onDeleteTask: (nodeId: string) => void;
 }
 
-export function PriorityList({ state, onSelectNode, onResume, compact = false, savedTasks, onTasksChange }: PriorityListProps) {
+export function PriorityList({ state, onSelectNode, onResume, compact = false, onAddTask, onToggleTask, onDeleteTask }: PriorityListProps) {
   const [newItem, setNewItem] = useState('');
-  const [userItems, setUserItems] = useState<UserTask[]>(savedTasks || []);
-
-  // Sync from parent when savedTasks changes (e.g., on state restore)
-  useEffect(() => {
-    if (savedTasks && savedTasks.length > 0 && userItems.length === 0) {
-      setUserItems(savedTasks);
-    }
-  }, [savedTasks]);
-
-  const updateItems = (items: UserTask[]) => {
-    setUserItems(items);
-    onTasksChange?.(items);
-  };
 
   const addItem = () => {
-    if (!newItem.trim()) return;
-    updateItems([...userItems, { id: Date.now().toString(), text: newItem.trim(), done: false }]);
+    const text = newItem.trim();
+    if (!text) return;
+    onAddTask(text);
     setNewItem('');
-  };
-
-  const toggleItem = (id: string) => {
-    updateItems(userItems.map(item =>
-      item.id === id ? { ...item, done: !item.done } : item
-    ));
-  };
-
-  const deleteItem = (id: string) => {
-    updateItems(userItems.filter(item => item.id !== id));
   };
 
   // System-computed priority items from OrbitFlow
   const priorityItems = state?.priority || [];
+
+  // User-added tasks are now first-class task nodes, identified by a `user:`
+  // source. Derive them from the synced tree state so checking/deleting here
+  // stays in lockstep with the tree view.
+  const userTasks = Object.values(state?.tasks || {}).filter(
+    (t) => t.sourceId?.startsWith('user:')
+  );
 
   return (
     <div className={`priority-list ${compact ? 'compact' : ''}`}>
@@ -92,27 +75,27 @@ export function PriorityList({ state, onSelectNode, onResume, compact = false, s
         </div>
       )}
 
-      {/* User-added tasks */}
-      {userItems.length > 0 && (
+      {/* User-added tasks (synced task nodes) */}
+      {userTasks.length > 0 && (
         <div className="priority-section">
           <div className="priority-section-label">My Tasks</div>
-          {userItems.map(item => (
-            <div key={item.id} className={`priority-item user ${item.done ? 'done' : ''}`}>
+          {userTasks.map(task => (
+            <div key={task.id} className={`priority-item user ${task.done ? 'done' : ''}`}>
               <input
                 type="checkbox"
-                checked={item.done}
-                onChange={() => toggleItem(item.id)}
+                checked={!!task.done}
+                onChange={() => onToggleTask(task.id)}
               />
-              <span className="priority-name">{item.text}</span>
+              <span className="priority-name" onClick={() => onSelectNode(task.id)}>{task.name}</span>
               {!compact && (
-                <button className="delete-btn" onClick={() => deleteItem(item.id)}>×</button>
+                <button className="delete-btn" onClick={() => onDeleteTask(task.id)}>×</button>
               )}
             </div>
           ))}
         </div>
       )}
 
-      {priorityItems.length === 0 && userItems.length === 0 && (
+      {priorityItems.length === 0 && userTasks.length === 0 && (
         <div className="priority-empty">
           No priority items yet. Tasks will appear here as you work.
         </div>

@@ -29,6 +29,31 @@ body {
   padding: 0 4px;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.section-action {
+  background: rgba(79, 156, 255, 0.12);
+  border: 1px solid rgba(79, 156, 255, 0.35);
+  color: #4f9cff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.section-action:hover {
+  background: rgba(79, 156, 255, 0.24);
+}
+
 .legend-compact {
   display: flex;
   gap: 10px;

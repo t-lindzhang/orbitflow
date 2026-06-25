@@ -6,7 +6,7 @@ import { PriorityList } from './components/PriorityList';
 import './styles/sidebar.css';
 
 function SidebarApp() {
-  const { state, sendMessage, userTasks, saveUserTasks } = useVSCodeAPI();
+  const { state, sendMessage } = useVSCodeAPI();
 
   const handleReveal = (nodeId: string) => {
     sendMessage('reveal', { nodeId });
@@ -20,10 +20,26 @@ function SidebarApp() {
     sendMessage('openFullView');
   };
 
+  const handleAddTask = (text: string) => {
+    sendMessage('addUserTask', { text });
+  };
+
+  const handleToggleTask = (nodeId: string) => {
+    sendMessage('toggleDone', { nodeId });
+  };
+
+  const handleDeleteTask = (nodeId: string) => {
+    sendMessage('delete', { nodeId });
+  };
+
   return (
     <div className="sidebar-container">
       <div className="sidebar-section">
-        <h3 className="section-title">Focus Tree</h3>
+        <div className="section-header">
+          <h3 className="section-title">Focus Tree</h3>
+          <button className="section-action" onClick={() => sendMessage('syncAdo')}
+            title="Sync Azure DevOps tasks">☁︎ ADO</button>
+        </div>
         {state && state.rootNodeId ? (
           <CompactTree state={state} onSelectNode={handleResume} />
         ) : (
@@ -43,7 +59,7 @@ function SidebarApp() {
       <div className="sidebar-section">
         <h3 className="section-title">Priorities</h3>
         <PriorityList state={state} onSelectNode={handleReveal} onResume={handleResume} compact
-          savedTasks={userTasks} onTasksChange={saveUserTasks} />
+          onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} />
       </div>
     </div>
   );

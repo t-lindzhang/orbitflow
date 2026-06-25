@@ -58,6 +58,11 @@
         "command": "orbitflow.clearAll",
         "title": "OrbitFlow: Clear Memory Trees",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "orbitflow.syncAdo",
+        "title": "OrbitFlow: Sync Azure DevOps Tasks",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -86,8 +91,33 @@
           "command": "orbitflow.clearAll",
           "when": "view == orbitflow.treeView",
           "group": "1_actions@3"
+        },
+        {
+          "command": "orbitflow.syncAdo",
+          "when": "view == orbitflow.treeView",
+          "group": "1_actions@4"
         }
       ]
+    },
+    "configuration": {
+      "title": "OrbitFlow",
+      "properties": {
+        "orbitflow.ado.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Opt in to Azure DevOps task sync. When enabled, run **OrbitFlow: Sync Azure DevOps Tasks** to choose which assigned work items to keep as task nodes."
+        },
+        "orbitflow.ado.org": {
+          "type": "string",
+          "default": "msazure",
+          "markdownDescription": "Azure DevOps organization for task sync. Accepts an org name (e.g. `msazure`) or a full URL (`https://msazure.visualstudio.com` or `https://dev.azure.com/msazure`). Leave blank to disable ADO sync."
+        },
+        "orbitflow.ado.project": {
+          "type": "string",
+          "default": "CCI",
+          "markdownDescription": "Azure DevOps project whose work items assigned to you are imported as task nodes. Leave blank to disable ADO sync."
+        }
+      }
     }
   },
   "scripts": {

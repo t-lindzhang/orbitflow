@@ -280,7 +280,11 @@ g:hover > .prune-btn {
 }
 
 .tree-node.active .node-label {
-  fill: #44ff88;
+  fill: #fff;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .tree-node:hover .node-label {
@@ -391,7 +395,7 @@ g:hover > .prune-btn {
   border: 1px solid #555;
   border-radius: 10px;
   width: 260px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
   z-index: 100;
   animation: cardFadeIn 0.12s ease;
@@ -443,6 +447,9 @@ g:hover > .prune-btn {
 
 .sticky-card-actions {
   padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sticky-resume-btn {
@@ -460,6 +467,87 @@ g:hover > .prune-btn {
 
 .sticky-resume-btn:hover {
   background: rgba(68, 255, 136, 0.2);
+}
+
+/* Split delete button: main action + dropdown caret */
+.sticky-delete-split {
+  position: relative;
+  display: flex;
+  width: 100%;
+}
+
+.sticky-delete-main {
+  flex: 1;
+  padding: 8px 10px;
+  background: rgba(255, 90, 90, 0.1);
+  border: 1px solid rgba(255, 90, 90, 0.35);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  color: #ff7a7a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.sticky-delete-caret {
+  width: 30px;
+  padding: 8px 0;
+  background: rgba(255, 90, 90, 0.1);
+  border: 1px solid rgba(255, 90, 90, 0.35);
+  border-radius: 0 6px 6px 0;
+  color: #ff7a7a;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+
+.sticky-delete-main:hover,
+.sticky-delete-caret:hover,
+.sticky-delete-caret[aria-expanded="true"] {
+  background: rgba(255, 90, 90, 0.22);
+}
+
+.sticky-delete-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  z-index: 20;
+}
+
+.sticky-delete-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sticky-delete-menu button:hover {
+  background: rgba(255, 90, 90, 0.14);
+}
+
+.sticky-delete-menu .menu-label {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sticky-delete-menu .menu-hint {
+  color: #888;
+  font-size: 10px;
 }
 
 /* Minimap */

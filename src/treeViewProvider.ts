@@ -132,6 +132,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   private async handleMessage(msg: InboundMessage): Promise<void> {
     switch (msg.type) {
       case "ready":
+        await this.migrateUserTasks();
         this.postState();
         // Also send persisted user tasks
         {
@@ -190,6 +191,14 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         break;
       case "saveUserTasks":
         await this.context.workspaceState.update("orbitflow.userTasks.v1", (msg as any).tasks);
+        break;
+      case "addUserTask":
+        if (msg.text?.trim()) {
+          await this.addUserTaskNode(msg.text.trim());
+        }
+        break;
+      case "syncAdo":
+        void vscode.commands.executeCommand("orbitflow.syncAdo");
         break;
       case "loadUserTasks": {
         const tasks = this.context.workspaceState.get<any[]>("orbitflow.userTasks.v1") || [];
@@ -547,6 +556,214 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     }
     node.waiting = nowWaiting;
     node.awaitingChoice = nowWaiting ? info.awaitingChoice ?? false : false;
+  }
+
+  /**
+   * Surface an Azure DevOps work item as a "task" node. Dedups/updates by
+   * `sourceId` (`ado:<id>`) so repeated syncs refresh in place; new items
+   * attach at the tree root. State and priority flow through to the node's
+   * done status and urgency.
+   */
+  async upsertTaskNode(info: {
+    sourceId: string;
+    title: string;
+    detail: string;
+    urgent: boolean;
+    done: boolean;
+  }): Promise<void> {
+    let treeId = this.mainTreeId();
+    if (!treeId) {
+      await this.autoBootstrap();
+      treeId = this.mainTreeId();
+    }
+    if (!treeId) {
+      return;
+    }
+
+    const existing = this.state.nodes.find(
+      (n) => n.sourceId === info.sourceId && n.treeId === treeId
+    );
+    if (existing) {
+      existing.title = info.title;
+      existing.detail = info.detail;
+      existing.type = "task";
+      existing.urgent = info.urgent;
+      existing.status = info.done ? "done" : "open";
+      existing.lastActiveAt = Date.now();
+      this.normalizeAllTrees();
+      await this.persist();
+      return;
+    }
+
+    const parentId = this.rootOf(treeId);
+    const depth = parentId ? this.depthOf(parentId) + 1 : 0;
+    this.state.nodes.push({
+      id: genId(),
+      treeId,
+      parentId,
+      title: info.title,
+      type: "task",
+      relevance: Math.max(0.3, 1 - depth * 0.15),
+      urgent: info.urgent,
+      status: info.done ? "done" : "open",
+      lastActiveAt: Date.now(),
+      detail: info.detail,
+      snapshot: this.capture.snapshot(),
+      sourceId: info.sourceId,
+    });
+
+    this.normalizeAllTrees();
+    await this.persist();
+  }
+
+  /**
+   * Create a first-class task node from a user-typed task. It joins the tree
+   * at the root and snapshots the current workspace context (open files,
+   * active file, recent terminal commands) so it carries associated files like
+   * any other node. Marked with a `user:` source so the priority list can
+   * surface it under "My Tasks".
+   */
+  async addUserTaskNode(text: string, done = false): Promise<void> {
+    let treeId = this.mainTreeId();
+    if (!treeId) {
+      await this.autoBootstrap();
+      treeId = this.mainTreeId();
+    }
+    if (!treeId) {
+      return;
+    }
+
+    const parentId = this.rootOf(treeId);
+    const depth = parentId ? this.depthOf(parentId) + 1 : 0;
+    this.state.nodes.push({
+      id: genId(),
+      treeId,
+      parentId,
+      title: text,
+      type: "task",
+      relevance: Math.max(0.4, 1 - depth * 0.15),
+      urgent: false,
+      status: done ? "done" : "open",
+      lastActiveAt: Date.now(),
+      detail: this.capture.describe(),
+      snapshot: this.capture.snapshot(),
+      sourceId: `user:${genId()}`,
+    });
+
+    this.normalizeAllTrees();
+    await this.persist();
+  }
+
+  /**
+   * One-time migration of legacy separately-stored user tasks
+   * (`orbitflow.userTasks.v1`) into real task nodes, so previously added tasks
+   * aren't lost now that user tasks are first-class nodes.
+   */
+  private async migrateUserTasks(): Promise<void> {
+    if (this.context.workspaceState.get<boolean>("orbitflow.userTasks.migrated")) {
+      return;
+    }
+    const tasks =
+      this.context.workspaceState.get<{ text: string; done?: boolean }[]>(
+        "orbitflow.userTasks.v1"
+      ) || [];
+    for (const t of tasks) {
+      if (t?.text?.trim()) {
+        await this.addUserTaskNode(t.text.trim(), !!t.done);
+      }
+    }
+    await this.context.workspaceState.update("orbitflow.userTasks.migrated", true);
+    await this.context.workspaceState.update("orbitflow.userTasks.v1", []);
+  }
+
+  /**
+   * Drop ADO-sourced task nodes the user no longer wants to keep. `keep` holds
+   * the `sourceId`s to retain; any node with an `ado:` source outside that set
+   * is removed. Orphaned children (e.g. chats nested under a removed task) are
+   * reattached to the root by {@link normalizeAllTrees}.
+   */
+  async pruneAdoTasks(keepSourceIds: string[]): Promise<void> {
+    const keep = new Set(keepSourceIds);
+    const before = this.state.nodes.length;
+    this.state.nodes = this.state.nodes.filter(
+      (n) => !(n.sourceId?.startsWith("ado:") && !keep.has(n.sourceId))
+    );
+    if (this.state.nodes.length !== before) {
+      this.normalizeAllTrees();
+      await this.persist();
+    }
+  }
+
+  /**
+   * Re-parent kept ADO task nodes to mirror the work-item hierarchy. Each link
+   * nests a node under its parent's node when that parent is also imported;
+   * otherwise (or for top-level items) the node sits at the tree root. Cycles
+   * are guarded against. Called after a sync upserts the chosen items.
+   */
+  async applyAdoHierarchy(
+    links: { sourceId: string; parentSourceId?: string }[]
+  ): Promise<void> {
+    const treeId = this.mainTreeId();
+    if (!treeId) {
+      return;
+    }
+    const root = this.rootOf(treeId);
+    const bySource = new Map<string, string>();
+    for (const n of this.state.nodes) {
+      if (n.sourceId?.startsWith("ado:")) {
+        bySource.set(n.sourceId, n.id);
+      }
+    }
+
+    let changed = false;
+    for (const link of links) {
+      const nodeId = bySource.get(link.sourceId);
+      if (!nodeId) {
+        continue;
+      }
+      const node = this.state.nodes.find((n) => n.id === nodeId);
+      if (!node) {
+        continue;
+      }
+      let newParent: string | null = root;
+      if (link.parentSourceId) {
+        const parentNodeId = bySource.get(link.parentSourceId);
+        // Only nest under an imported parent, and never create a cycle.
+        if (
+          parentNodeId &&
+          parentNodeId !== nodeId &&
+          !this.isDescendantOf(parentNodeId, nodeId)
+        ) {
+          newParent = parentNodeId;
+        }
+      }
+      if (node.parentId !== newParent) {
+        node.parentId = newParent;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.normalizeAllTrees();
+      await this.persist();
+    }
+  }
+
+  /** True when `nodeId` lies in the subtree rooted at `ancestorId`. */
+  private isDescendantOf(nodeId: string, ancestorId: string): boolean {
+    const seen = new Set<string>();
+    let current = this.state.nodes.find((n) => n.id === nodeId);
+    while (current?.parentId) {
+      if (current.parentId === ancestorId) {
+        return true;
+      }
+      if (seen.has(current.parentId)) {
+        break;
+      }
+      seen.add(current.parentId);
+      current = this.state.nodes.find((n) => n.id === current!.parentId);
+    }
+    return false;
   }
 
   /**

@@ -132,6 +132,8 @@ function convertState(orbitState: any, priority: PriorityItem[] = []): FocusTree
       detail: tn.detail || '',
       waiting: tn.waiting || false,
       awaitingChoice: tn.awaitingChoice || false,
+      sourceId: tn.sourceId,
+      done: tn.status === 'done',
     };
 
     // Create a TreeNode

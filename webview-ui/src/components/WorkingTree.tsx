@@ -8,6 +8,7 @@ interface WorkingTreeProps {
   onSelectNode: (nodeId: string) => void;
   onResumeNode: (nodeId: string) => void;
   onPruneNode: (nodeId: string) => void;
+  onDeleteNode: (nodeId: string) => void;
 }
 
 interface PositionedNode {
@@ -20,10 +21,11 @@ interface PositionedNode {
 
 const DEPTH_THRESHOLD = 3;
 
-export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: WorkingTreeProps) {
+export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode, onDeleteNode }: WorkingTreeProps) {
   const [hoveredNode, setHoveredNode] = useState<PositionedNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<PositionedNode | null>(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
   const zoomBehavior = useRef<any>(null);
@@ -32,6 +34,22 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
     if (!state.rootNodeId) return [];
     return layoutTree(state, state.rootNodeId);
   }, [state]);
+
+  // Dismiss the sticky card when clicking anywhere outside it. A tree node
+  // click reopens the card afterwards (React batches both updates), so
+  // switching directly between nodes still works. Capture phase is required
+  // because d3-zoom stops propagation of mousedown on the SVG canvas.
+  useEffect(() => {
+    if (!selectedNode) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target || !target.closest('.sticky-card')) {
+        setSelectedNode(null);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick, true);
+    return () => document.removeEventListener('mousedown', onDocClick, true);
+  }, [selectedNode]);
 
   // Set up D3 zoom/pan
   useEffect(() => {
@@ -44,6 +62,8 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
       .scaleExtent([0.3, 3])
       .on('zoom', (event: any) => {
         g.attr('transform', event.transform);
+        const t = event.transform;
+        setTransform({ x: t.x, y: t.y, k: t.k });
       });
 
     svg.call(zoomBehavior.current as any);
@@ -114,6 +134,24 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
     return rootNode ? state.tasks[rootNode.taskId] : null;
   }, [state]);
 
+  // Position a hover/sticky card just to the side of its node, accounting for
+  // the current zoom/pan. Flips to the node's left when there isn't room on
+  // the right, and vertically centers on the node.
+  const cardStyleFor = (pn: PositionedNode): React.CSSProperties => {
+    const svg = svgRef.current;
+    if (!svg) return {};
+    const rect = svg.getBoundingClientRect();
+    const screenX = rect.left + pn.x * transform.k + transform.x;
+    const screenY = rect.top + pn.y * transform.k + transform.y;
+    const baseR = pn.node.state === 'active' ? 22 : pn.node.parentId ? 16 : 22;
+    const r = baseR * transform.k;
+    const cardW = 270;
+    const flipLeft = screenX + r + 24 + cardW > window.innerWidth;
+    return flipLeft
+      ? { left: screenX - r - 18, top: screenY, transform: 'translate(-100%, -50%)' }
+      : { left: screenX + r + 18, top: screenY, transform: 'translateY(-50%)' };
+  };
+
   if (!state.rootNodeId) {
     return (
       <div className="working-tree-empty">
@@ -178,7 +216,8 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
               {isUrgent && <UrgentBorder cx={pn.x} cy={pn.y} r={r + 6} nodeType={pn.task.nodeType || 'task'} />}
               <TreeNodeShape cx={pn.x} cy={pn.y} r={r} nodeType={pn.task.nodeType || 'task'}
                 stroke={nodeStroke} fill={nodeFill} isActive={isActive} />
-              <text className="node-label" x={pn.x} y={pn.y + r + 10}>
+              <text className="node-label" x={pn.x} y={pn.y + r + 10}
+                style={isActive ? { fill: nodeStroke, fontWeight: 600 } : undefined}>
                 {truncate(pn.task.name, 30)}
               </text>
             </g>
@@ -201,33 +240,6 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
         </div>
       </div>
 
-      {/* Minimap */}
-      <div className="minimap">
-        <svg viewBox={getViewBox(positioned)}>
-          {positioned.map(pn => {
-            if (!pn.node.parentId) return null;
-            const parent = positioned.find(p => p.id === pn.node.parentId);
-            if (!parent) return null;
-            return (
-              <line key={`mm-e-${pn.id}`} className="mm-edge"
-                x1={parent.x} y1={parent.y} x2={pn.x} y2={pn.y} />
-            );
-          })}
-          {positioned.map(pn => {
-            const baseColor = state.baseColor || '#b44dff';
-            const complementary = getComplementaryColor(baseColor);
-            const isActive = pn.node.state === 'active';
-            const color = isActive ? complementary : baseColor;
-            return (
-              <circle key={`mm-${pn.id}`}
-                cx={pn.x} cy={pn.y} r={isActive ? 6 : 4}
-                style={{ fill: isActive ? color : color, opacity: isActive ? 1 : 0.6 }}
-              />
-            );
-          })}
-        </svg>
-      </div>
-
       {/* Nudge (side-positioned) */}
       {showNudge && (
         <div className="nudge-container">
@@ -248,13 +260,16 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
       )}
 
       {/* Preview Card (on hover) */}
-      {hoveredNode && !selectedNode && <PreviewCard node={hoveredNode} />}
+      {hoveredNode && !selectedNode && <PreviewCard node={hoveredNode} style={cardStyleFor(hoveredNode)} />}
 
       {/* Sticky Node Card (on click — does NOT auto-resume) */}
       {selectedNode && (
         <StickyNodeCard
           node={selectedNode}
+          style={cardStyleFor(selectedNode)}
           onResume={() => { onResumeNode(selectedNode.id); setSelectedNode(null); }}
+          onDelete={() => { onDeleteNode(selectedNode.id); setSelectedNode(null); }}
+          onPrune={() => { onPruneNode(selectedNode.id); setSelectedNode(null); }}
           onClose={() => setSelectedNode(null)}
         />
       )}
@@ -310,7 +325,7 @@ function UrgentBorder({ cx, cy, r, nodeType }: {
   }
 }
 
-function PreviewCard({ node }: { node: PositionedNode }) {
+function PreviewCard({ node, style }: { node: PositionedNode; style?: React.CSSProperties }) {
   const timeAgo = getTimeAgo(node.node.startedAt);
   const stateLabel = node.node.state === 'active' ? 'Active Now'
     : node.node.state === 'stale' ? 'Stale' : 'Recent';
@@ -318,7 +333,7 @@ function PreviewCard({ node }: { node: PositionedNode }) {
     : node.task.nodeType === 'idea' ? '🔺 Idea' : '⭕ Task';
 
   return (
-    <div className="preview-card">
+    <div className="preview-card" style={style}>
       <div className="card-header">
         <span className="card-task-name">{node.task.name}</span>
         <span className={`card-status ${node.node.state}`}>{stateLabel}</span>
@@ -343,9 +358,12 @@ function PreviewCard({ node }: { node: PositionedNode }) {
   );
 }
 
-function StickyNodeCard({ node, onResume, onClose }: {
+function StickyNodeCard({ node, style, onResume, onDelete, onPrune, onClose }: {
   node: PositionedNode;
+  style?: React.CSSProperties;
   onResume: () => void;
+  onDelete: () => void;
+  onPrune: () => void;
   onClose: () => void;
 }) {
   const timeAgo = getTimeAgo(node.node.startedAt);
@@ -353,9 +371,23 @@ function StickyNodeCard({ node, onResume, onClose }: {
     : node.node.state === 'stale' ? 'Stale' : 'Recent';
   const typeLabel = node.task.nodeType === 'session' ? '⬜ Session'
     : node.task.nodeType === 'idea' ? '🔺 Idea' : '⭕ Task';
+  const [menuOpen, setMenuOpen] = useState(false);
+  const deleteRef = useRef<HTMLDivElement>(null);
+
+  // Close the delete dropdown when clicking anywhere outside it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (deleteRef.current && !deleteRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [menuOpen]);
 
   return (
-    <div className="sticky-card" onClick={(e) => e.stopPropagation()}>
+    <div className="sticky-card" style={style} onClick={(e) => e.stopPropagation()}>
       <div className="sticky-card-header">
         <span className="sticky-card-title">{node.task.name}</span>
         <button className="sticky-card-close" onClick={onClose}>×</button>
@@ -365,6 +397,9 @@ function StickyNodeCard({ node, onResume, onClose }: {
         <span>{typeLabel}</span>
         <span className={`card-status ${node.node.state}`}>{stateLabel}</span>
       </div>
+      {node.task.detail && (
+        <div className="card-description">{node.task.detail}</div>
+      )}
       <div className="sticky-card-files">
         {node.task.files.length > 0
           ? node.task.files.slice(0, 3).map((f, i) => (
@@ -375,6 +410,28 @@ function StickyNodeCard({ node, onResume, onClose }: {
       </div>
       <div className="sticky-card-actions">
         <button className="sticky-resume-btn" onClick={onResume}>▶ Resume</button>
+        <div className="sticky-delete-split" ref={deleteRef}>
+          <button className="sticky-delete-main" onClick={onDelete}
+            title="Delete only this node — its children move up to the parent">
+            🗑 Delete node
+          </button>
+          <button className="sticky-delete-caret" onClick={() => setMenuOpen((o) => !o)}
+            title="More delete options" aria-haspopup="menu" aria-expanded={menuOpen}>
+            ▾
+          </button>
+          {menuOpen && (
+            <div className="sticky-delete-menu" role="menu">
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onDelete(); }}>
+                <span className="menu-label">🗑 Delete node</span>
+                <span className="menu-hint">children move up to the parent</span>
+              </button>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onPrune(); }}>
+                <span className="menu-label">✂ Delete subtree</span>
+                <span className="menu-hint">this node and everything under it</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
