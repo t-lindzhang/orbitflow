@@ -32,8 +32,18 @@ export type UpsertSession = (info: SessionInfo) => Promise<void>;
 export class CopilotSessionService implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private watcher?: vscode.FileSystemWatcher;
+  private pollTimer?: ReturnType<typeof setInterval>;
+  /** Last seen size+mtime per session file, to skip unchanged files on rescan. */
+  private readonly fileStamps = new Map<string, string>();
 
   private static readonly MAX_SEED = 10;
+  /**
+   * How often to rescan the chat store. The store lives outside the workspace
+   * folder, where VS Code's file watcher does not deliver content-change
+   * (`onDidChange`) events, so polling is the only reliable way to notice that
+   * the active session has grown.
+   */
+  private static readonly POLL_MS = 5000;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -54,8 +64,25 @@ export class CopilotSessionService implements vscode.Disposable {
       return;
     }
 
-    await this.seedExisting(dir);
+    await this.rescan(dir);
 
+    // Primary mechanism: poll the store. The chat files live outside the
+    // workspace folder, so `onDidChange` from a FileSystemWatcher is not
+    // delivered for the live session; a timer is the dependable fallback.
+    this.pollTimer = setInterval(() => void this.rescan(dir), CopilotSessionService.POLL_MS);
+
+    // Rescan immediately when the window regains focus — cheap and catches up
+    // the moment the user returns from another app.
+    this.disposables.push(
+      vscode.window.onDidChangeWindowState((s) => {
+        if (s.focused) {
+          void this.rescan(dir);
+        }
+      })
+    );
+
+    // Best-effort watcher too: harmless if events never fire, and on some
+    // platforms create/delete events still arrive.
     this.watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(dir, "*.jsonl")
     );
@@ -65,7 +92,7 @@ export class CopilotSessionService implements vscode.Disposable {
       this.watcher.onDidCreate(onChange),
       this.watcher.onDidChange(onChange)
     );
-    this.log.info(`Watching chat sessions in ${dir.fsPath}`);
+    this.log.info(`Watching chat sessions in ${dir.fsPath} (poll ${CopilotSessionService.POLL_MS}ms)`);
   }
 
   /** workspaceStorage/<id>/chatSessions — derived from this extension's storage. */
@@ -79,7 +106,12 @@ export class CopilotSessionService implements vscode.Disposable {
     return vscode.Uri.joinPath(workspaceStorage, "chatSessions");
   }
 
-  private async seedExisting(dir: vscode.Uri): Promise<void> {
+  /**
+   * Re-read the chat store and (re)parse any session file that is new or has
+   * changed size/mtime since we last looked. Cheap to call frequently because
+   * unchanged files are skipped via {@link fileStamps}.
+   */
+  private async rescan(dir: vscode.Uri): Promise<void> {
     try {
       const entries = await vscode.workspace.fs.readDirectory(dir);
       const files = entries
@@ -90,7 +122,18 @@ export class CopilotSessionService implements vscode.Disposable {
         .map(([name]) => name)
         .slice(-CopilotSessionService.MAX_SEED);
       for (const name of files) {
-        await this.handle(vscode.Uri.joinPath(dir, name));
+        const uri = vscode.Uri.joinPath(dir, name);
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          const stamp = `${stat.size}:${stat.mtime}`;
+          if (this.fileStamps.get(name) === stamp) {
+            continue; // unchanged since last scan
+          }
+          this.fileStamps.set(name, stamp);
+        } catch {
+          continue;
+        }
+        await this.handle(uri);
       }
     } catch {
       /* ignore */
@@ -279,6 +322,10 @@ export class CopilotSessionService implements vscode.Disposable {
   }
 
   dispose(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
     this.disposables.forEach((d) => d.dispose());
   }
 }

@@ -9,6 +9,7 @@ import {
   InboundMessage,
   NodeType,
   OrbitState,
+  ResumeContext,
   ThoughtNode,
   Tree,
 } from "./types";
@@ -259,6 +260,10 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // Capture once so every node in this batch shares the same terminal context
+    // and active-editor info, but each node's FILES come from its own cluster.
+    const context = this.capture.snapshot();
+
     // Unmatched detections attach to the goal root (depth 1), never to a deep
     // active node — that previously produced a misleading hierarchy.
     const fallbackParent = this.rootOf(treeId);
@@ -284,7 +289,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         const existing = this.state.nodes.find(n => n.id === existingId);
         if (existing) {
           existing.lastActiveAt = Date.now();
-          existing.snapshot = this.capture.snapshot();
+          existing.snapshot = this.nodeSnapshot(context, cluster.files);
         }
         continue;
       }
@@ -314,7 +319,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         status: "open",
         lastActiveAt: Date.now(),
         detail: cluster.detail,
-        snapshot: this.capture.snapshot(),
+        snapshot: this.nodeSnapshot(context, cluster.files),
       });
       titleToId.set(key, id);
       added++;
@@ -324,6 +329,34 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       this.normalizeAllTrees();
       await this.persist();
     }
+  }
+
+  /**
+   * Build a node's resume snapshot from the files it actually owns (absolute
+   * fsPaths from its cluster). Terminal commands come from the shared capture;
+   * the active-editor cursor line is preserved only if the active file is one
+   * of this node's files. No file is ever added that the node doesn't own.
+   */
+  private nodeSnapshot(
+    context: ResumeContext,
+    files: string[]
+  ): ResumeContext {
+    const active = context.files.find((f) => f.active);
+    const seen = new Set<string>();
+    const out: ResumeContext["files"] = [];
+    for (const path of files) {
+      if (seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      const isActive = active?.path === path;
+      out.push({
+        path,
+        active: isActive || undefined,
+        line: isActive ? active?.line : undefined,
+      });
+    }
+    return { files: out, terminalCommands: context.terminalCommands };
   }
 
   /**

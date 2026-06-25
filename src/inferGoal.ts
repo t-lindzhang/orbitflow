@@ -10,7 +10,7 @@ export interface WorkContext {
 
 interface GitRepoLike {
   state: {
-    HEAD?: { name?: string };
+    HEAD?: { name?: string; commit?: string };
     workingTreeChanges: { uri: vscode.Uri }[];
   };
   log(opts: { maxEntries: number }): Promise<{ message: string }[]>;
