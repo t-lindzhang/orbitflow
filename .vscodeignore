@@ -1,9 +1,16 @@
 .vscode/**
 node_modules/**
 src/**
-media/**.ts
-media/**.map
 esbuild.js
 tsconfig.json
 **/*.map
 Design Doc.md
+
+# webview-ui: only the built bundles in webview-ui/dist are shipped
+webview-ui/node_modules/**
+webview-ui/src/**
+webview-ui/build.js
+webview-ui/vite.config.ts
+webview-ui/tsconfig.json
+webview-ui/package.json
+webview-ui/package-lock.json

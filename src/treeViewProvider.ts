@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { Storage } from "./storage";
 import { CaptureService } from "./capture";
-import { resumeContext } from "./resume";
+import { resumeContext, revealChatSession } from "./resume";
 import { gatherWorkContext, inferGoal } from "./inferGoal";
 import { ClusteredNode } from "./autoNode";
 import { proposeHierarchy } from "./reorganize";
@@ -9,6 +9,7 @@ import {
   InboundMessage,
   NodeType,
   OrbitState,
+  ResumeContext,
   ThoughtNode,
   Tree,
 } from "./types";
@@ -23,6 +24,16 @@ const TREE_COLORS = [
   "#36c9c6",
 ];
 
+/**
+ * Common words ignored when scoring how related a chat session is to an
+ * existing task node, so generic filler doesn't create false matches.
+ */
+const SESSION_STOPWORDS = new Set([
+  "the", "and", "for", "with", "this", "that", "from", "into", "how", "what",
+  "why", "when", "where", "which", "should", "could", "would", "can", "are",
+  "you", "your", "use", "using", "add", "fix", "make", "get", "set", "new",
+]);
+
 export class TreeViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "orbitflow.treeView";
 
@@ -34,6 +45,9 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   private history: OrbitState[] = [];
   private savedSnapshot: OrbitState;
   private static readonly MAX_HISTORY = 50;
+
+  /** In-flight bootstrap, so concurrent callers never create two trees. */
+  private bootstrapping?: Promise<void>;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -147,6 +161,9 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       case "resume":
         await this.resume(msg.nodeId);
         break;
+      case "reveal":
+        await this.reveal(msg.nodeId);
+        break;
       case "delete":
         await this.deleteNode(msg.nodeId);
         break;
@@ -191,8 +208,24 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   /**
    * On startup, automatically detect the current work tree, name it from the
    * inferred goal, and seed it with a root node — no user interaction.
+   *
+   * Concurrent callers (activation + chat-session detection) share a single
+   * in-flight run so we never create two trees for the same workspace.
    */
   async autoBootstrap(): Promise<void> {
+    if (this.bootstrapping) {
+      await this.bootstrapping;
+      return;
+    }
+    this.bootstrapping = this.doBootstrap();
+    try {
+      await this.bootstrapping;
+    } finally {
+      this.bootstrapping = undefined;
+    }
+  }
+
+  private async doBootstrap(): Promise<void> {
     if (this.state.trees.length > 0) {
       // Already initialised for this workspace — keep everything in one tree
       // and tidy up structure.
@@ -282,6 +315,10 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // Capture once so every node in this batch shares the same terminal context
+    // and active-editor info, but each node's FILES come from its own cluster.
+    const context = this.capture.snapshot();
+
     // Unmatched detections attach to the goal root (depth 1), never to a deep
     // active node — that previously produced a misleading hierarchy.
     const fallbackParent = this.rootOf(treeId);
@@ -307,7 +344,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         const existing = this.state.nodes.find(n => n.id === existingId);
         if (existing) {
           existing.lastActiveAt = Date.now();
-          existing.snapshot = this.capture.snapshot();
+          existing.snapshot = this.nodeSnapshot(context, cluster.files);
         }
         continue;
       }
@@ -337,7 +374,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         status: "open",
         lastActiveAt: Date.now(),
         detail: cluster.detail,
-        snapshot: this.capture.snapshot(),
+        snapshot: this.nodeSnapshot(context, cluster.files),
       });
       titleToId.set(key, id);
       added++;
@@ -349,11 +386,49 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Surface a Copilot chat session as a square (session-type) node. */
+  /**
+   * Build a node's resume snapshot from the files it actually owns (absolute
+   * fsPaths from its cluster). Terminal commands come from the shared capture;
+   * the active-editor cursor line is preserved only if the active file is one
+   * of this node's files. No file is ever added that the node doesn't own.
+   */
+  private nodeSnapshot(
+    context: ResumeContext,
+    files: string[]
+  ): ResumeContext {
+    const active = context.files.find((f) => f.active);
+    const seen = new Set<string>();
+    const out: ResumeContext["files"] = [];
+    for (const path of files) {
+      if (seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      const isActive = active?.path === path;
+      out.push({
+        path,
+        active: isActive || undefined,
+        line: isActive ? active?.line : undefined,
+      });
+    }
+    return { files: out, terminalCommands: context.terminalCommands };
+  }
+
+  /**
+   * Surface a Copilot chat session in the tree as a SINGLE node. A normal
+   * working chat is a square "session" node; an exploratory/question-driven
+   * chat is a triangular "idea" node instead. A chat never produces both — the
+   * node's shape simply reflects what the chat currently looks like.
+   */
   async upsertSessionNode(info: {
     sourceId: string;
     title: string;
     detail: string;
+    isExploratory?: boolean;
+    questionText?: string;
+    waiting?: boolean;
+    awaitingChoice?: boolean;
+    activeMs?: number;
   }): Promise<void> {
     let treeId = this.mainTreeId();
     if (!treeId) {
@@ -364,34 +439,157 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // A chat's shape: exploratory chats are ideas (triangles), otherwise the
+    // chat is tracked as a session (square).
+    const desiredType: NodeType = info.isExploratory ? "idea" : "session";
+
+    // Remove any legacy separate "idea" child previously spawned for this chat,
+    // so older state collapses back to a single node per session.
+    const legacyIdeaId = `${info.sourceId}#idea`;
+    this.state.nodes = this.state.nodes.filter(
+      (n) => !(n.sourceId === legacyIdeaId && n.treeId === treeId)
+    );
+
+    // 1) The same chat we've already surfaced — update it in place.
     const existing = this.state.nodes.find(
       (n) => n.sourceId === info.sourceId && n.treeId === treeId
     );
     if (existing) {
       existing.title = info.title;
       existing.detail = info.detail;
+      existing.type = desiredType;
       existing.lastActiveAt = Date.now();
-    } else {
-      const parentId = this.rootOf(treeId);
-      const depth = parentId ? this.depthOf(parentId) + 1 : 0;
-      this.state.nodes.push({
-        id: genId(),
-        treeId,
-        parentId,
-        title: info.title,
-        type: "session",
-        relevance: Math.max(0.25, 1 - depth * 0.15),
-        urgent: false,
-        status: "open",
-        lastActiveAt: Date.now(),
-        detail: info.detail,
-        snapshot: this.capture.snapshot(),
-        sourceId: info.sourceId,
-      });
+      this.applySessionSignals(existing, info);
+      this.normalizeAllTrees();
+      await this.persist();
+      return;
     }
+
+    // 2) Dedup — a *different* chat that summarized to a near-identical title
+    // folds into the existing node rather than adding another level-1 sibling.
+    const key = info.title.toLowerCase().trim();
+    const chatTitles = new Map<string, string>();
+    for (const n of this.state.nodes) {
+      if (
+        n.treeId === treeId &&
+        (n.type === "session" || n.type === "idea") &&
+        n.sourceId?.startsWith("chat:")
+      ) {
+        chatTitles.set(n.title.toLowerCase(), n.id);
+      }
+    }
+    const dupId = chatTitles.get(key) ?? this.findSimilarNode(treeId, key, chatTitles);
+    if (dupId) {
+      const dup = this.state.nodes.find((n) => n.id === dupId);
+      if (dup) {
+        dup.detail = info.detail;
+        dup.lastActiveAt = Date.now();
+        this.applySessionSignals(dup, info);
+      }
+      this.normalizeAllTrees();
+      await this.persist();
+      return;
+    }
+
+    // 3) A genuinely new chat — nest it under the most relevant existing task
+    // node, falling back to the tree root when nothing is clearly related, so
+    // unrelated chats don't all pile onto level 1.
+    const parentId = this.relateSessionParent(
+      treeId,
+      `${info.title} ${info.questionText ?? info.detail}`
+    );
+    const depth = parentId ? this.depthOf(parentId) + 1 : 0;
+    this.state.nodes.push({
+      id: genId(),
+      treeId,
+      parentId,
+      title: info.title,
+      type: desiredType,
+      relevance: Math.max(0.25, 1 - depth * 0.15),
+      urgent: false,
+      status: "open",
+      lastActiveAt: Date.now(),
+      detail: info.detail,
+      snapshot: this.capture.snapshot(),
+      sourceId: info.sourceId,
+      waiting: info.waiting ?? false,
+      waitingSince: info.waiting ? Date.now() : undefined,
+      awaitingChoice: info.awaitingChoice ?? false,
+      activeMs: info.activeMs ?? 0,
+    });
 
     this.normalizeAllTrees();
     await this.persist();
+  }
+
+  /**
+   * Fold a chat session's derived signals (waiting/needs-attention, quick
+   * re-prompt, time spent) onto a node. Stamps {@link ThoughtNode.waitingSince}
+   * only on the transition into the waiting state — so "longest waiting" rank
+   * reflects when the agent first went idle — and clears it once the user
+   * re-engages (the chat no longer reads as awaiting a prompt).
+   */
+  private applySessionSignals(
+    node: ThoughtNode,
+    info: { waiting?: boolean; awaitingChoice?: boolean; activeMs?: number }
+  ): void {
+    if (typeof info.activeMs === "number") {
+      node.activeMs = info.activeMs;
+    }
+    const nowWaiting = info.waiting ?? false;
+    if (nowWaiting && !node.waiting) {
+      node.waitingSince = Date.now();
+      // Freshly needs attention again — un-acknowledge so it flashes and
+      // re-enters the priority list.
+      node.acknowledged = false;
+    } else if (!nowWaiting) {
+      node.waitingSince = undefined;
+    }
+    node.waiting = nowWaiting;
+    node.awaitingChoice = nowWaiting ? info.awaitingChoice ?? false : false;
+  }
+
+  /**
+   * Pick the most relevant existing *task* node to nest a chat session under,
+   * scored by word overlap between the chat's text and the node's
+   * title/detail. Returns the tree root when nothing is a clear match, so
+   * unrelated chats surface at the top rather than under an arbitrary task.
+   */
+  private relateSessionParent(treeId: string, text: string): string | null {
+    const root = this.rootOf(treeId);
+    const wordsOf = (s: string): Set<string> =>
+      new Set(
+        (s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter(
+          (w) => !SESSION_STOPWORDS.has(w)
+        )
+      );
+    const chatWords = wordsOf(text);
+    if (chatWords.size === 0) {
+      return root;
+    }
+
+    let best: { id: string; score: number } | null = null;
+    for (const n of this.state.nodes) {
+      if (n.treeId !== treeId || n.type !== "task" || n.id === root) {
+        continue;
+      }
+      if (this.depthOf(n.id) >= 3) {
+        continue; // keep the tree shallow
+      }
+      const nodeWords = wordsOf(`${n.title} ${n.detail ?? ""}`);
+      if (nodeWords.size === 0) {
+        continue;
+      }
+      const shared = [...chatWords].filter((w) => nodeWords.has(w)).length;
+      if (shared < 2) {
+        continue;
+      }
+      const score = shared / Math.min(chatWords.size, nodeWords.size);
+      if (score >= 0.2 && (!best || score > best.score)) {
+        best = { id: n.id, score };
+      }
+    }
+    return best?.id ?? root;
   }
 
   /** Re-cluster the active tree's existing nodes into sensible subtrees. */
@@ -536,6 +734,11 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
           n.status = "open";
           changed = true;
         }
+        // Heal self-referential parents (a node can't be its own parent).
+        if (n.parentId === n.id) {
+          n.parentId = null;
+          changed = true;
+        }
       }
       const ids = new Set(treeNodes.map((n) => n.id));
       const roots = treeNodes.filter(
@@ -622,8 +825,51 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     node.lastActiveAt = Date.now();
     this.state.activeNodeId = node.id;
     this.state.activeTreeId = node.treeId;
+    // Engaging the node acknowledges it: stop flashing and drop it from the
+    // priority list until it needs attention again.
+    node.waiting = false;
+    node.waitingSince = undefined;
+    node.awaitingChoice = false;
+    node.acknowledged = true;
     await this.persist();
     await resumeContext(node.snapshot);
+  }
+
+  /**
+   * Navigate to a node's location without the heavier "resume" restore (no
+   * terminal replay, no undo entry). For chat-derived nodes this brings up the
+   * Copilot chat session; otherwise it opens the files the task touched.
+   */
+  private async reveal(nodeId: string): Promise<void> {
+    const node = this.state.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      return;
+    }
+    this.state.activeNodeId = node.id;
+    this.state.activeTreeId = node.treeId;
+
+    // Coming back to a node acknowledges it: stop the "needs attention" flash
+    // until the session next goes idle awaiting a prompt. Safe because the
+    // session poller skips unchanged .jsonl files, so waiting won't be
+    // re-applied until the conversation actually advances again.
+    node.waiting = false;
+    node.waitingSince = undefined;
+    node.awaitingChoice = false;
+    node.acknowledged = true;
+
+    await this.persist(false);
+
+    if (node.sourceId?.startsWith("chat:")) {
+      const shown = await revealChatSession(node.sourceId);
+      // Chat sessions don't carry meaningful file locations, so we're done once
+      // the chat surface is up. Fall back to files only if it couldn't open.
+      if (shown) {
+        return;
+      }
+    }
+    if (node.snapshot.files.length > 0) {
+      await resumeContext(node.snapshot);
+    }
   }
 
   private async deleteNode(nodeId: string): Promise<void> {
@@ -776,8 +1022,11 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Rank open nodes by what needs attention now — sessions awaiting follow-up,
-   * stale-but-important work, and high-relevance items. NOT a 1:1 tree remap.
+   * Rank open nodes by what needs attention now. Agent sessions that finished
+   * and await a prompt float to the top — the longest-waiting first — followed
+   * by urgent work, then high-relevance/stale items. Tasks in a workflow (a
+   * top-level branch) the developer has spent more time in are weighted up.
+   * NOT a 1:1 tree remap.
    */
   private computePriority(): { id: string; reason: string }[] {
     const treeId = this.mainTreeId();
@@ -787,17 +1036,60 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     const rootId = this.rootOf(treeId);
     const now = Date.now();
 
+    const byId = new Map(this.state.nodes.map((n) => [n.id, n] as const));
+    // The "workflow" a node belongs to = its top-level branch (the ancestor
+    // that is a direct child of the root). Sum each branch's time spent so we
+    // can weight busier workflows higher.
+    const branchOf = (nodeId: string): string => {
+      let cur = byId.get(nodeId);
+      let last = nodeId;
+      while (cur && cur.parentId && cur.parentId !== rootId) {
+        last = cur.parentId;
+        cur = byId.get(cur.parentId);
+      }
+      return last;
+    };
+    const branchTimeMs = new Map<string, number>();
+    for (const n of this.state.nodes) {
+      if (n.treeId !== treeId || n.id === rootId) {
+        continue;
+      }
+      const b = branchOf(n.id);
+      branchTimeMs.set(b, (branchTimeMs.get(b) ?? 0) + (n.activeMs ?? 0));
+    }
+
     return this.state.nodes
       .filter(
-        (n) => n.treeId === treeId && n.status !== "done" && n.id !== rootId
+        (n) =>
+          n.treeId === treeId &&
+          n.status !== "done" &&
+          n.id !== rootId &&
+          // Visited since it last needed attention — keep it out of the list
+          // until it goes idle awaiting a prompt again (which un-acknowledges).
+          !(n.acknowledged && !n.waiting && !n.urgent)
       )
       .map((n) => {
         const ageDays = (now - n.lastActiveAt) / 86_400_000;
         let score = n.relevance * 30 + Math.min(ageDays, 14) * 3;
+        // Weight tasks in workflows the developer has invested more time in
+        // (capped so a single long session can't dominate everything).
+        const branchMin = (branchTimeMs.get(branchOf(n.id)) ?? 0) / 60_000;
+        score += Math.min(branchMin, 120) * 0.5;
         let reason = "Important";
         if (n.urgent) {
           score += 100;
           reason = "Urgent";
+        } else if (n.waiting) {
+          score += 60;
+          // Longest-waiting sessions rank first.
+          const waitMin = n.waitingSince ? (now - n.waitingSince) / 60_000 : 0;
+          score += Math.min(waitMin, 240) * 0.5;
+          reason = "Waiting on you";
+          if (n.awaitingChoice) {
+            // Quick to re-prompt (just pick/confirm) — a light nudge up.
+            score += 15;
+            reason = "Quick: pick an option";
+          }
         } else if (n.type === "session") {
           score += 40;
           reason = "Session needs follow-up";

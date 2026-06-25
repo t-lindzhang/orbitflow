@@ -17,7 +17,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const autoNodes = new AutoNodeService(
     (clusters) => provider.addAutoNodes(clusters),
     () => provider.getActiveTreeNodes(),
-    log
+    log,
+    context.workspaceState
   );
 
   const copilotSessions = new CopilotSessionService(

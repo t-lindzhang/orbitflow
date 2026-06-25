@@ -1,12 +1,25 @@
-// Shared types between extension and webview
+// Shared types between extension and webview.
+//
+// The wire/protocol types (what the extension actually sends) live in the
+// extension's src/types.ts and are re-exported here so there is ONE source of
+// truth for the protocol. The view-model types below (Task/TreeNode/
+// FocusTreeState) are webview-only shapes DERIVED from the wire types by
+// convertState() in hooks/useVSCodeAPI.ts.
+export type {
+  NodeType,
+  PriorityItem,
+  ThoughtNode,
+  OrbitState,
+  Tree,
+} from '../../src/types';
+import type { NodeType, PriorityItem } from '../../src/types';
+
 export interface CodeSnapshot {
   file: string;
   startLine: number;
   lines: string[];
   highlightedLines: number[];
 }
-
-export type NodeType = 'task' | 'session' | 'idea';
 
 export interface Task {
   id: string;
@@ -18,6 +31,9 @@ export interface Task {
   nodeType: NodeType;
   urgent?: boolean;
   relevance?: number; // 0-1, drives visual prominence
+  detail?: string; // one-sentence description shown on cards
+  waiting?: boolean; // agent finished its turn and is awaiting a prompt
+  awaitingChoice?: boolean; // agent's last message just asks you to pick/confirm
 }
 
 export interface TreeNode {
@@ -37,9 +53,4 @@ export interface FocusTreeState {
   activeNodeId: string | null;
   priority?: PriorityItem[];
   baseColor?: string; // Tree's base color (e.g., "#c77dff")
-}
-
-export interface PriorityItem {
-  id: string;
-  reason: string;
 }

@@ -12,6 +12,10 @@ function FullViewApp() {
     sendMessage('selectNode', { nodeId });
   };
 
+  const handleReveal = (nodeId: string) => {
+    sendMessage('reveal', { nodeId });
+  };
+
   const handleResume = (nodeId: string) => {
     sendMessage('resume', { nodeId });
   };
@@ -35,7 +39,7 @@ function FullViewApp() {
           </div>
         </div>
         {state ? (
-          <WorkingTree state={state} onSelectNode={handleSelectNode} onResumeNode={handleResume} onPruneNode={handlePrune} />
+          <WorkingTree state={state} onSelectNode={handleSelectNode} onResumeNode={handleReveal} onPruneNode={handlePrune} />
         ) : (
           <div className="empty-state">Loading...</div>
         )}

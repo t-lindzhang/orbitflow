@@ -251,6 +251,26 @@ g:hover > .prune-btn {
   filter: drop-shadow(0 0 8px rgba(255, 107, 107, 0.4)), drop-shadow(0 0 6px rgba(180, 77, 255, 0.6));
 }
 
+/* Needs attention — an agent session finished and is waiting on you. A slow
+   amber flash (distinct from the fast red urgent pulse and green active glow)
+   gently nudges you to come back. Stops once the chat is re-engaged. */
+.tree-node.needs-attention rect,
+.tree-node.needs-attention circle,
+.tree-node.needs-attention polygon {
+  animation: attentionFlash 1.8s ease-in-out infinite;
+}
+
+@keyframes attentionFlash {
+  0%, 100% {
+    stroke: #ffb454;
+    filter: drop-shadow(0 0 4px rgba(255, 180, 84, 0.35));
+  }
+  50% {
+    stroke: #ffd591;
+    filter: drop-shadow(0 0 14px rgba(255, 180, 84, 0.95));
+  }
+}
+
 .tree-node .node-label {
   fill: #aaa;
   font-size: 10px;
@@ -322,6 +342,14 @@ g:hover > .prune-btn {
   border-bottom: 1px solid #2a2a4a;
   display: flex;
   gap: 12px;
+}
+
+.card-description {
+  padding: 8px 12px;
+  color: #ccc;
+  font-size: 11px;
+  line-height: 1.4;
+  border-bottom: 1px solid #2a2a4a;
 }
 
 .meta-item {
@@ -607,6 +635,23 @@ g:hover > .prune-btn {
 
 .priority-item.done .priority-name {
   text-decoration: line-through;
+}
+
+/* Needs attention — the node this item points at finished and is waiting on
+   you. Slow amber flash; stops once the node is clicked (acknowledged). */
+.priority-item.needs-attention {
+  animation: priorityFlash 1.8s ease-in-out infinite;
+}
+
+@keyframes priorityFlash {
+  0%, 100% {
+    background: rgba(255, 180, 84, 0.1);
+    box-shadow: inset 3px 0 0 rgba(255, 180, 84, 0.5);
+  }
+  50% {
+    background: rgba(255, 180, 84, 0.24);
+    box-shadow: inset 3px 0 0 rgba(255, 213, 145, 1);
+  }
 }
 
 .priority-dot {

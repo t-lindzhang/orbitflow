@@ -8,8 +8,8 @@ import './styles/sidebar.css';
 function SidebarApp() {
   const { state, sendMessage, userTasks, saveUserTasks } = useVSCodeAPI();
 
-  const handleSelectNode = (nodeId: string) => {
-    sendMessage('selectNode', { nodeId });
+  const handleReveal = (nodeId: string) => {
+    sendMessage('reveal', { nodeId });
   };
 
   const handleResume = (nodeId: string) => {

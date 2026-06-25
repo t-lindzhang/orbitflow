@@ -24,6 +24,17 @@ export interface ThoughtNode {
   snapshot: ResumeContext;
   /** Stable external id (e.g. a Copilot session file) for dedup/update. */
   sourceId?: string;
+  /** Agent session finished its turn and is idle awaiting the next prompt. */
+  waiting?: boolean;
+  /** Timestamp the node entered the waiting state (drives longest-waiting rank). */
+  waitingSince?: number;
+  /** Best-effort: the agent's last message just asks the user to pick/confirm. */
+  awaitingChoice?: boolean;
+  /** Active time spent, derived from the session's activity timestamps (ms). */
+  activeMs?: number;
+  /** User has visited this node since it last needed attention; clears flash
+   *  and drops it from the priority list until it needs attention again. */
+  acknowledged?: boolean;
 }
 
 export interface Tree {
@@ -45,6 +56,7 @@ export interface OrbitState {
 export type InboundMessage =
   | { type: "ready" }
   | { type: "resume"; nodeId: string }
+  | { type: "reveal"; nodeId: string }
   | { type: "delete"; nodeId: string }
   | { type: "pruneSubtree"; nodeId: string }
   | { type: "toggleDone"; nodeId: string }

@@ -15,27 +15,46 @@ const extensionConfig = {
   logLevel: "info",
 };
 
-/** @type {import('esbuild').BuildOptions} */
-const webviewConfig = {
-  entryPoints: ["media/main.ts"],
+/**
+ * The ONLY front-end: the React webview app under webview-ui/. Both the
+ * sidebar (compact tree) and the editor panel (full tree) are bundled here so
+ * a single `npm run build` rebuilds the extension AND its UI together. There
+ * is intentionally no second (vanilla) front-end that could drift out of sync.
+ */
+const webviewBase = {
   bundle: true,
-  outfile: "media/main.js",
   format: "iife",
   platform: "browser",
   target: "es2020",
-  sourcemap: true,
+  loader: { ".tsx": "tsx", ".ts": "ts", ".css": "css" },
+  define: { "process.env.NODE_ENV": '"production"' },
+  minify: true,
   logLevel: "info",
 };
 
+/** @type {import('esbuild').BuildOptions} */
+const sidebarConfig = {
+  ...webviewBase,
+  entryPoints: ["webview-ui/src/sidebar-entry.tsx"],
+  outfile: "webview-ui/dist/sidebar.js",
+};
+
+/** @type {import('esbuild').BuildOptions} */
+const fullviewConfig = {
+  ...webviewBase,
+  entryPoints: ["webview-ui/src/fullview-entry.tsx"],
+  outfile: "webview-ui/dist/fullview.js",
+};
+
 async function main() {
-  const ctxExt = await esbuild.context(extensionConfig);
-  const ctxWeb = await esbuild.context(webviewConfig);
+  const configs = [extensionConfig, sidebarConfig, fullviewConfig];
+  const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
   if (watch) {
-    await Promise.all([ctxExt.watch(), ctxWeb.watch()]);
+    await Promise.all(contexts.map((c) => c.watch()));
     console.log("[esbuild] watching...");
   } else {
-    await Promise.all([ctxExt.rebuild(), ctxWeb.rebuild()]);
-    await Promise.all([ctxExt.dispose(), ctxWeb.dispose()]);
+    await Promise.all(contexts.map((c) => c.rebuild()));
+    await Promise.all(contexts.map((c) => c.dispose()));
   }
 }
 

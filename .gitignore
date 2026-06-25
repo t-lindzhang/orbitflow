@@ -1,6 +1,4 @@
 node_modules/
 dist/
 !webview-ui/dist/
-media/main.js
-media/main.js.map
 *.vsix

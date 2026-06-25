@@ -160,6 +160,7 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
           const isUrgent = pn.task.urgent;
           const relevance = pn.task.relevance ?? 0.5;
           const isActive = pn.node.state === 'active';
+          const needsAttention = !!pn.task.waiting && !isActive;
           const saturation = isActive ? 1 : 0.3 + relevance * 0.7;
           const baseColor = state.baseColor || '#b44dff';
           const complementary = getComplementaryColor(baseColor);
@@ -168,7 +169,7 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
           return (
             <g
               key={pn.id}
-              className={`tree-node ${pn.node.state} ${isUrgent ? 'urgent' : ''}`}
+              className={`tree-node ${pn.node.state} ${isUrgent ? 'urgent' : ''} ${needsAttention ? 'needs-attention' : ''}`}
               style={{ filter: !isActive ? `saturate(${saturation})` : undefined }}
               onClick={() => setSelectedNode(pn)}
               onMouseEnter={() => setHoveredNode(pn)}
@@ -326,6 +327,9 @@ function PreviewCard({ node }: { node: PositionedNode }) {
         <span className="meta-item">🕐 {timeAgo}</span>
         <span className="meta-item">{typeLabel}</span>
       </div>
+      {node.task.detail && (
+        <div className="card-description">{node.task.detail}</div>
+      )}
       <div className="card-files">
         {node.task.files.length > 0
           ? node.task.files.slice(0, 3).map((f, i) => (
