@@ -159,6 +159,7 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
           const isUrgent = pn.task.urgent;
           const relevance = pn.task.relevance ?? 0.5;
           const isActive = pn.node.state === 'active';
+          const needsAttention = !!pn.task.waiting && !isActive;
           const saturation = isActive ? 1 : 0.3 + relevance * 0.7;
           const baseColor = state.baseColor || '#b44dff';
           const complementary = getComplementaryColor(baseColor);
@@ -167,7 +168,7 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
           return (
             <g
               key={pn.id}
-              className={`tree-node ${pn.node.state} ${isUrgent ? 'urgent' : ''}`}
+              className={`tree-node ${pn.node.state} ${isUrgent ? 'urgent' : ''} ${needsAttention ? 'needs-attention' : ''}`}
               style={{ filter: !isActive ? `saturate(${saturation})` : undefined }}
               onClick={() => onResumeNode(pn.id)}
               onMouseEnter={() => setHoveredNode(pn)}

@@ -12,6 +12,10 @@ function FullViewApp() {
     sendMessage('selectNode', { nodeId });
   };
 
+  const handleReveal = (nodeId: string) => {
+    sendMessage('reveal', { nodeId });
+  };
+
   const handleResume = (nodeId: string) => {
     sendMessage('resume', { nodeId });
   };
@@ -31,7 +35,7 @@ function FullViewApp() {
           </div>
         </div>
         {state ? (
-          <WorkingTree state={state} onSelectNode={handleSelectNode} onResumeNode={handleResume} onPruneNode={handlePrune} />
+          <WorkingTree state={state} onSelectNode={handleSelectNode} onResumeNode={handleReveal} onPruneNode={handlePrune} />
         ) : (
           <div className="empty-state">Loading...</div>
         )}
@@ -41,7 +45,7 @@ function FullViewApp() {
 
       <div className="fullview-checklist-panel">
         <h2 className="panel-title">Priorities</h2>
-        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} />
+        <PriorityList state={state} onSelectNode={handleReveal} onResume={handleResume} />
       </div>
     </div>
   );

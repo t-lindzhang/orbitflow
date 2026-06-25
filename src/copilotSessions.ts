@@ -3,7 +3,13 @@ import * as vscode from "vscode";
 /** Minimal shape of a persisted chat request we read the user's prompt from. */
 interface RawRequest {
   requestId?: string;
+  /** Epoch ms when the user sent this turn. */
+  timestamp?: number;
   message?: { text?: string; parts?: { text?: string }[] };
+  /** Set (via a later delta) once the assistant's turn for this request finishes. */
+  result?: unknown;
+  /** The assistant's response parts for this turn. */
+  response?: unknown[];
 }
 
 export interface SessionInfo {
@@ -18,6 +24,18 @@ export interface SessionInfo {
   isExploratory: boolean;
   /** Concatenated user prompts, used to relate the chat to an existing task. */
   questionText: string;
+  /**
+   * True when the agent has finished its latest turn and the chat is now idle
+   * awaiting the next user prompt — i.e. it "needs attention".
+   */
+  waiting?: boolean;
+  /**
+   * Best-effort: the agent's last message just asks the user to choose/confirm,
+   * so re-prompting is quick (a single click or word).
+   */
+  awaitingChoice?: boolean;
+  /** Span of session activity derived from request timestamps (ms). */
+  activeMs?: number;
 }
 
 export type UpsertSession = (info: SessionInfo) => Promise<void>;
@@ -159,14 +177,32 @@ export class CopilotSessionService implements vscode.Disposable {
       //   kind:0  -> base session object (v.requests holds the FIRST request)
       //   kind:2  -> append: v is items pushed onto the array at path k
       //   kind:1  -> set: replace the value at path k with v
-      // We must replay these to see follow-up prompts, otherwise only the very
-      // first request is ever observed. Collect requests by id, in order.
-      const requestsById = new Map<string, RawRequest>();
-      const addRequest = (r: unknown): void => {
-        const req = r as RawRequest;
-        if (req && typeof req === "object" && typeof req.requestId === "string") {
-          requestsById.set(req.requestId, req);
+      // We must replay these to see follow-up prompts, response completion and
+      // timestamps, otherwise only the very first request is ever observed.
+      // Keep requests in insertion order so index-based patches (e.g.
+      // ["requests", N, "result"]) line up, while de-duping resends by id.
+      const order: RawRequest[] = [];
+      const idIndex = new Map<string, number>();
+      const upsertReq = (v: unknown): void => {
+        const req = v as RawRequest;
+        if (!req || typeof req !== "object") {
+          return;
         }
+        const id = typeof req.requestId === "string" ? req.requestId : undefined;
+        if (id !== undefined && idIndex.has(id)) {
+          order[idIndex.get(id)!] = req;
+        } else {
+          if (id !== undefined) {
+            idIndex.set(id, order.length);
+          }
+          order.push(req);
+        }
+      };
+      const ensureSlot = (i: number): RawRequest => {
+        while (order.length <= i) {
+          order.push({});
+        }
+        return order[i];
       };
       let customTitle: string | undefined;
 
@@ -193,35 +229,66 @@ export class CopilotSessionService implements vscode.Disposable {
               customTitle = base.customTitle;
             }
             if (Array.isArray(base.requests)) {
-              base.requests.forEach(addRequest);
+              order.length = 0;
+              idIndex.clear();
+              base.requests.forEach(upsertReq);
             }
             continue;
           }
 
           // Delta touching the requests array.
           const k = obj.k;
-          if (Array.isArray(k) && k[0] === "requests") {
-            if (k.length === 1 && Array.isArray(obj.v)) {
-              // Append (or whole-array set) of request objects.
-              obj.v.forEach(addRequest);
-            } else if (
-              k.length === 2 &&
-              typeof k[1] === "number" &&
-              obj.v &&
-              typeof obj.v === "object"
-            ) {
-              // Replace a specific request slot.
-              addRequest(obj.v);
+          if (!Array.isArray(k) || k[0] !== "requests") {
+            continue;
+          }
+          if (k.length === 1) {
+            // Append (or whole-array set) of request objects.
+            if (Array.isArray(obj.v)) {
+              obj.v.forEach(upsertReq);
             }
-            // Deeper patches (e.g. ["requests", N, "result"]) don't change the
-            // user's prompt text, so they're ignored.
+          } else if (typeof k[1] === "number") {
+            const idx = k[1];
+            if (k.length === 2) {
+              // Replace a specific request slot.
+              if (obj.v && typeof obj.v === "object") {
+                order[idx] = obj.v as RawRequest;
+                const id = (obj.v as RawRequest).requestId;
+                if (typeof id === "string") {
+                  idIndex.set(id, idx);
+                }
+              }
+            } else if (k.length >= 3) {
+              // Deeper patches we care about: turn completion, response text,
+              // and (rarely) a corrected timestamp.
+              const slot = ensureSlot(idx);
+              const field = k[2];
+              if (field === "result") {
+                slot.result = obj.v;
+              } else if (field === "timestamp" && typeof obj.v === "number") {
+                slot.timestamp = obj.v;
+              } else if (field === "response") {
+                if (k.length === 3) {
+                  if (obj.kind === 2 && Array.isArray(obj.v)) {
+                    const arr = (slot.response ??= []);
+                    obj.v.forEach((p) => arr.push(p));
+                  } else if (Array.isArray(obj.v)) {
+                    slot.response = obj.v;
+                  }
+                } else if (k.length === 4 && typeof k[3] === "number") {
+                  const arr = (slot.response ??= []);
+                  arr[k[3]] = obj.v;
+                }
+              }
+            }
           }
         } catch {
           /* skip malformed line */
         }
       }
 
-      const requests = [...requestsById.values()];
+      const requests = order.filter(
+        (r) => r && typeof r === "object" && (r.requestId || r.message)
+      );
       if (requests.length === 0) {
         return undefined;
       }
@@ -240,6 +307,27 @@ export class CopilotSessionService implements vscode.Disposable {
       // re-summarize from all prompts into a short title + real description.
       const summary = await this.summarize(texts, customTitle);
 
+      // Activity span ("time spent") from request timestamps, plus whether the
+      // agent has finished its latest turn (waiting on the user) and whether
+      // that last turn just asks the user to pick/confirm something.
+      const stamps = order
+        .map((r) => (typeof r?.timestamp === "number" ? r.timestamp : undefined))
+        .filter((t): t is number => typeof t === "number");
+      const activeMs =
+        stamps.length >= 2 ? Math.max(...stamps) - Math.min(...stamps) : 0;
+      const last = order[order.length - 1];
+      const anyResult = order.some((r) => r && r.result != null);
+      let waiting = false;
+      let awaitingChoice = false;
+      if (last) {
+        waiting = anyResult
+          ? last.result != null
+          : this.assistantText(last).length > 0;
+        if (waiting) {
+          awaitingChoice = this.looksLikeChoice(this.assistantText(last));
+        }
+      }
+
       const sourceId = `chat:${uri.path.split("/").pop() ?? uri.path}`;
       return {
         sourceId,
@@ -247,6 +335,9 @@ export class CopilotSessionService implements vscode.Disposable {
         detail: summary.description.slice(0, 200),
         isExploratory: this.isExploratory(texts),
         questionText: texts.join(" • ").slice(0, 400),
+        waiting,
+        awaitingChoice,
+        activeMs,
       };
     } catch {
       return undefined;
@@ -379,6 +470,59 @@ export class CopilotSessionService implements vscode.Disposable {
       }
     }
     return "";
+  }
+
+  /**
+   * Best-effort extraction of the assistant's prose from a request's response
+   * parts. Only markdown text parts carry user-facing prose; other part kinds
+   * (tool calls, edits, server-startup notices) are ignored.
+   */
+  private assistantText(request: RawRequest): string {
+    const resp = request?.response;
+    if (!Array.isArray(resp)) {
+      return "";
+    }
+    const parts: string[] = [];
+    for (const p of resp) {
+      if (!p || typeof p !== "object") {
+        continue;
+      }
+      const part = p as { kind?: string; content?: unknown; value?: unknown };
+      if (part.kind && part.kind !== "markdownContent") {
+        continue;
+      }
+      const raw = part.content ?? part.value;
+      if (typeof raw === "string") {
+        parts.push(raw);
+      } else if (
+        raw &&
+        typeof raw === "object" &&
+        typeof (raw as { value?: unknown }).value === "string"
+      ) {
+        parts.push((raw as { value: string }).value);
+      }
+    }
+    return parts.join("\n").trim();
+  }
+
+  /** Phrases that signal the agent is asking the user to choose/confirm. */
+  private static readonly CHOICE_RE =
+    /\b(would you like|which (option|one)|do you want|should i|let me know|pick (one|an option)|choose|confirm|proceed\?|y\/n|yes\/no|option [a-c1-9])\b/i;
+
+  /**
+   * Heuristic: does the agent's last message read like a quick choice/confirm
+   * (so re-prompting takes little effort)? Either it matches a known phrase or
+   * it ends on a short-ish question.
+   */
+  private looksLikeChoice(text: string): boolean {
+    const t = text.trim();
+    if (!t) {
+      return false;
+    }
+    if (CopilotSessionService.CHOICE_RE.test(t)) {
+      return true;
+    }
+    return t.endsWith("?") && t.length <= 400;
   }
 
   private toTitle(text: string): string {

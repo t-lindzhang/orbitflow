@@ -52,8 +52,9 @@ export function PriorityList({ state, onSelectNode, onResume, compact = false }:
           {priorityItems.map((item) => {
             const task = state?.tasks[item.id];
             if (!task) return null;
+            const needsAttention = !!task.waiting;
             return (
-              <div key={item.id} className="priority-item system"
+              <div key={item.id} className={`priority-item system ${needsAttention ? 'needs-attention' : ''}`}
                 onClick={() => onSelectNode(item.id)}>
                 <span className={`priority-dot ${task.nodeType || 'task'}`} />
                 <div className="priority-content">

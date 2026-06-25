@@ -8,8 +8,8 @@ import './styles/sidebar.css';
 function SidebarApp() {
   const { state, sendMessage } = useVSCodeAPI();
 
-  const handleSelectNode = (nodeId: string) => {
-    sendMessage('selectNode', { nodeId });
+  const handleReveal = (nodeId: string) => {
+    sendMessage('reveal', { nodeId });
   };
 
   const handleResume = (nodeId: string) => {
@@ -25,7 +25,7 @@ function SidebarApp() {
       <div className="sidebar-section">
         <h3 className="section-title">Focus Tree</h3>
         {state && state.rootNodeId ? (
-          <CompactTree state={state} onSelectNode={handleSelectNode} />
+          <CompactTree state={state} onSelectNode={handleReveal} />
         ) : (
           <div className="empty-state">
             Open a file to start building your focus tree...
@@ -37,7 +37,7 @@ function SidebarApp() {
 
       <div className="sidebar-section">
         <h3 className="section-title">Priorities</h3>
-        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} compact />
+        <PriorityList state={state} onSelectNode={handleReveal} onResume={handleResume} compact />
       </div>
 
       <button className="expand-btn" onClick={handleOpenFullView}>
