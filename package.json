@@ -36,7 +36,7 @@
     "commands": [
       {
         "command": "orbitflow.openGraph",
-        "title": "OrbitFlow: Open Memory Tree in Editor",
+        "title": "OrbitFlow: Open Focus Tree in Editor",
         "icon": "$(open-preview)"
       },
       {

@@ -1,31 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FocusTreeState, PriorityItem } from '../types';
+
+interface UserTask {
+  id: string;
+  text: string;
+  done: boolean;
+}
 
 interface PriorityListProps {
   state: FocusTreeState | null;
   onSelectNode: (nodeId: string) => void;
   onResume: (nodeId: string) => void;
   compact?: boolean;
+  savedTasks?: UserTask[];
+  onTasksChange?: (tasks: UserTask[]) => void;
 }
 
-export function PriorityList({ state, onSelectNode, onResume, compact = false }: PriorityListProps) {
+export function PriorityList({ state, onSelectNode, onResume, compact = false, savedTasks, onTasksChange }: PriorityListProps) {
   const [newItem, setNewItem] = useState('');
-  const [userItems, setUserItems] = useState<{ id: string; text: string; done: boolean }[]>([]);
+  const [userItems, setUserItems] = useState<UserTask[]>(savedTasks || []);
+
+  // Sync from parent when savedTasks changes (e.g., on state restore)
+  useEffect(() => {
+    if (savedTasks && savedTasks.length > 0 && userItems.length === 0) {
+      setUserItems(savedTasks);
+    }
+  }, [savedTasks]);
+
+  const updateItems = (items: UserTask[]) => {
+    setUserItems(items);
+    onTasksChange?.(items);
+  };
 
   const addItem = () => {
     if (!newItem.trim()) return;
-    setUserItems([...userItems, { id: Date.now().toString(), text: newItem.trim(), done: false }]);
+    updateItems([...userItems, { id: Date.now().toString(), text: newItem.trim(), done: false }]);
     setNewItem('');
   };
 
   const toggleItem = (id: string) => {
-    setUserItems(userItems.map(item =>
+    updateItems(userItems.map(item =>
       item.id === id ? { ...item, done: !item.done } : item
     ));
   };
 
   const deleteItem = (id: string) => {
-    setUserItems(userItems.filter(item => item.id !== id));
+    updateItems(userItems.filter(item => item.id !== id));
   };
 
   // System-computed priority items from OrbitFlow

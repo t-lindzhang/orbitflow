@@ -69,17 +69,29 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  /** Open the memory tree as a full editor tab (GitLens-style). */
+  /** Open the focus tree as a full editor tab. */
   openInEditor(): void {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Active);
-      return;
+      try {
+        this.panel.reveal(vscode.ViewColumn.Active);
+        return;
+      } catch {
+        // Panel was disposed but reference wasn't cleared
+        this.panel = undefined;
+      }
     }
     this.panel = vscode.window.createWebviewPanel(
       "orbitflow.graphPanel",
-      "OrbitFlow Memory Tree",
+      "OrbitFlow Focus Tree",
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true }
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+          this.context.extensionUri,
+          vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist"),
+        ],
+      }
     );
     this.panel.iconPath = vscode.Uri.joinPath(
       this.context.extensionUri,
@@ -121,6 +133,15 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case "ready":
         this.postState();
+        // Also send persisted user tasks
+        {
+          const tasks = this.context.workspaceState.get<any[]>("orbitflow.userTasks.v1") || [];
+          for (const webview of this.webviews) {
+            try {
+              webview.postMessage({ type: "userTasks", tasks });
+            } catch { this.webviews.delete(webview); }
+          }
+        }
         break;
       case "select":
         this.state.activeNodeId = msg.nodeId;
@@ -128,6 +149,15 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
           this.state.nodes.find((n) => n.id === msg.nodeId)?.treeId ?? null;
         await this.persist(false);
         break;
+      case "editNode": {
+        const node = this.state.nodes.find((n) => n.id === msg.nodeId);
+        if (node) {
+          if (msg.title !== undefined) { node.title = msg.title; }
+          if (msg.detail !== undefined) { node.detail = msg.detail; }
+          await this.persist();
+        }
+        break;
+      }
       case "resume":
         await this.resume(msg.nodeId);
         break;
@@ -158,6 +188,18 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       case "openGraph":
         this.openInEditor();
         break;
+      case "saveUserTasks":
+        await this.context.workspaceState.update("orbitflow.userTasks.v1", (msg as any).tasks);
+        break;
+      case "loadUserTasks": {
+        const tasks = this.context.workspaceState.get<any[]>("orbitflow.userTasks.v1") || [];
+        for (const webview of this.webviews) {
+          try {
+            webview.postMessage({ type: "userTasks", tasks });
+          } catch { this.webviews.delete(webview); }
+        }
+        break;
+      }
     }
   }
 
@@ -970,7 +1012,12 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   private postState(): void {
     const priority = this.computePriority();
     for (const webview of this.webviews) {
-      webview.postMessage({ type: "state", state: this.state, priority });
+      try {
+        webview.postMessage({ type: "state", state: this.state, priority });
+      } catch {
+        // Webview may have been disposed — remove it
+        this.webviews.delete(webview);
+      }
     }
   }
 
