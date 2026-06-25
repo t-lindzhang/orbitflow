@@ -32,6 +32,8 @@ export interface Task {
   urgent?: boolean;
   relevance?: number; // 0-1, drives visual prominence
   detail?: string; // one-sentence description shown on cards
+  waiting?: boolean; // agent finished its turn and is awaiting a prompt
+  awaitingChoice?: boolean; // agent's last message just asks you to pick/confirm
 }
 
 export interface TreeNode {

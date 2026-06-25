@@ -18,6 +18,7 @@ interface LayoutNode {
   nodeType: NodeType;
   relevance: number;
   detail: string;
+  waiting: boolean;
 }
 
 function NodeShape({ cx, cy, nodeType, state, isActive, stroke, fill }: {
@@ -96,6 +97,7 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
         {/* Nodes — shape based on type */}
         {nodes.map(n => {
           const isActive = n.state === 'active';
+          const needsAttention = n.waiting && !isActive;
           const relevance = n.relevance ?? 0.5;
           const saturation = isActive ? 1 : 0.3 + relevance * 0.7;
           const nodeColor = isActive ? complementary : baseColor;
@@ -103,6 +105,7 @@ export function CompactTree({ state, onSelectNode }: CompactTreeProps) {
           return (
             <g
               key={n.id}
+              className={`mini-node ${needsAttention ? 'needs-attention' : ''}`}
               onClick={() => onSelectNode(n.id)}
               onMouseEnter={() => setHovered(n)}
               onMouseLeave={() => setHovered(null)}
@@ -176,6 +179,7 @@ function layoutMiniTree(state: FocusTreeState): LayoutNode[] {
       nodeType: task?.nodeType || 'task',
       relevance: task?.relevance ?? 0.5,
       detail: task?.detail || '',
+      waiting: task?.waiting || false,
     });
 
     let offset = left;

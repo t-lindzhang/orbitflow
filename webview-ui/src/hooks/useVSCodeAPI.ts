@@ -62,6 +62,8 @@ export function useVSCodeAPI() {
       vscode.postMessage({ type: 'clearAll' });
     } else if (command === 'resume') {
       vscode.postMessage({ type: 'resume', nodeId: data?.nodeId });
+    } else if (command === 'reveal') {
+      vscode.postMessage({ type: 'reveal', nodeId: data?.nodeId });
     } else if (command === 'delete') {
       vscode.postMessage({ type: 'delete', nodeId: data?.nodeId });
     } else if (command === 'pruneSubtree') {
@@ -100,12 +102,14 @@ function convertState(orbitState: any, priority: PriorityItem[] = []): FocusTree
       name: tn.title || '?',
       files: tn.snapshot?.files?.map((f) => f.path) || [],
       createdAt: tn.lastActiveAt || Date.now(),
-      totalTimeSpent: 0,
+      totalTimeSpent: tn.activeMs || 0,
       lastCodeSnapshot: null,
       nodeType: tn.type || 'task', // task, session, idea
       urgent: tn.urgent || false,
       relevance: tn.relevance ?? 0.5,
       detail: tn.detail || '',
+      waiting: tn.waiting || false,
+      awaitingChoice: tn.awaitingChoice || false,
     };
 
     // Create a TreeNode

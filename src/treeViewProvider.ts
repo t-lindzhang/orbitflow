@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { Storage } from "./storage";
 import { CaptureService } from "./capture";
-import { resumeContext } from "./resume";
+import { resumeContext, revealChatSession } from "./resume";
 import { gatherWorkContext, inferGoal } from "./inferGoal";
 import { ClusteredNode } from "./autoNode";
 import { proposeHierarchy } from "./reorganize";
@@ -130,6 +130,9 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
         break;
       case "resume":
         await this.resume(msg.nodeId);
+        break;
+      case "reveal":
+        await this.reveal(msg.nodeId);
         break;
       case "delete":
         await this.deleteNode(msg.nodeId);
@@ -381,6 +384,9 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     detail: string;
     isExploratory?: boolean;
     questionText?: string;
+    waiting?: boolean;
+    awaitingChoice?: boolean;
+    activeMs?: number;
   }): Promise<void> {
     let treeId = this.mainTreeId();
     if (!treeId) {
@@ -411,6 +417,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       existing.detail = info.detail;
       existing.type = desiredType;
       existing.lastActiveAt = Date.now();
+      this.applySessionSignals(existing, info);
       this.normalizeAllTrees();
       await this.persist();
       return;
@@ -435,6 +442,7 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       if (dup) {
         dup.detail = info.detail;
         dup.lastActiveAt = Date.now();
+        this.applySessionSignals(dup, info);
       }
       this.normalizeAllTrees();
       await this.persist();
@@ -462,10 +470,41 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
       detail: info.detail,
       snapshot: this.capture.snapshot(),
       sourceId: info.sourceId,
+      waiting: info.waiting ?? false,
+      waitingSince: info.waiting ? Date.now() : undefined,
+      awaitingChoice: info.awaitingChoice ?? false,
+      activeMs: info.activeMs ?? 0,
     });
 
     this.normalizeAllTrees();
     await this.persist();
+  }
+
+  /**
+   * Fold a chat session's derived signals (waiting/needs-attention, quick
+   * re-prompt, time spent) onto a node. Stamps {@link ThoughtNode.waitingSince}
+   * only on the transition into the waiting state — so "longest waiting" rank
+   * reflects when the agent first went idle — and clears it once the user
+   * re-engages (the chat no longer reads as awaiting a prompt).
+   */
+  private applySessionSignals(
+    node: ThoughtNode,
+    info: { waiting?: boolean; awaitingChoice?: boolean; activeMs?: number }
+  ): void {
+    if (typeof info.activeMs === "number") {
+      node.activeMs = info.activeMs;
+    }
+    const nowWaiting = info.waiting ?? false;
+    if (nowWaiting && !node.waiting) {
+      node.waitingSince = Date.now();
+      // Freshly needs attention again — un-acknowledge so it flashes and
+      // re-enters the priority list.
+      node.acknowledged = false;
+    } else if (!nowWaiting) {
+      node.waitingSince = undefined;
+    }
+    node.waiting = nowWaiting;
+    node.awaitingChoice = nowWaiting ? info.awaitingChoice ?? false : false;
   }
 
   /**
@@ -744,8 +783,51 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     node.lastActiveAt = Date.now();
     this.state.activeNodeId = node.id;
     this.state.activeTreeId = node.treeId;
+    // Engaging the node acknowledges it: stop flashing and drop it from the
+    // priority list until it needs attention again.
+    node.waiting = false;
+    node.waitingSince = undefined;
+    node.awaitingChoice = false;
+    node.acknowledged = true;
     await this.persist();
     await resumeContext(node.snapshot);
+  }
+
+  /**
+   * Navigate to a node's location without the heavier "resume" restore (no
+   * terminal replay, no undo entry). For chat-derived nodes this brings up the
+   * Copilot chat session; otherwise it opens the files the task touched.
+   */
+  private async reveal(nodeId: string): Promise<void> {
+    const node = this.state.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      return;
+    }
+    this.state.activeNodeId = node.id;
+    this.state.activeTreeId = node.treeId;
+
+    // Coming back to a node acknowledges it: stop the "needs attention" flash
+    // until the session next goes idle awaiting a prompt. Safe because the
+    // session poller skips unchanged .jsonl files, so waiting won't be
+    // re-applied until the conversation actually advances again.
+    node.waiting = false;
+    node.waitingSince = undefined;
+    node.awaitingChoice = false;
+    node.acknowledged = true;
+
+    await this.persist(false);
+
+    if (node.sourceId?.startsWith("chat:")) {
+      const shown = await revealChatSession(node.sourceId);
+      // Chat sessions don't carry meaningful file locations, so we're done once
+      // the chat surface is up. Fall back to files only if it couldn't open.
+      if (shown) {
+        return;
+      }
+    }
+    if (node.snapshot.files.length > 0) {
+      await resumeContext(node.snapshot);
+    }
   }
 
   private async deleteNode(nodeId: string): Promise<void> {
@@ -893,8 +975,11 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Rank open nodes by what needs attention now — sessions awaiting follow-up,
-   * stale-but-important work, and high-relevance items. NOT a 1:1 tree remap.
+   * Rank open nodes by what needs attention now. Agent sessions that finished
+   * and await a prompt float to the top — the longest-waiting first — followed
+   * by urgent work, then high-relevance/stale items. Tasks in a workflow (a
+   * top-level branch) the developer has spent more time in are weighted up.
+   * NOT a 1:1 tree remap.
    */
   private computePriority(): { id: string; reason: string }[] {
     const treeId = this.mainTreeId();
@@ -904,17 +989,60 @@ export class TreeViewProvider implements vscode.WebviewViewProvider {
     const rootId = this.rootOf(treeId);
     const now = Date.now();
 
+    const byId = new Map(this.state.nodes.map((n) => [n.id, n] as const));
+    // The "workflow" a node belongs to = its top-level branch (the ancestor
+    // that is a direct child of the root). Sum each branch's time spent so we
+    // can weight busier workflows higher.
+    const branchOf = (nodeId: string): string => {
+      let cur = byId.get(nodeId);
+      let last = nodeId;
+      while (cur && cur.parentId && cur.parentId !== rootId) {
+        last = cur.parentId;
+        cur = byId.get(cur.parentId);
+      }
+      return last;
+    };
+    const branchTimeMs = new Map<string, number>();
+    for (const n of this.state.nodes) {
+      if (n.treeId !== treeId || n.id === rootId) {
+        continue;
+      }
+      const b = branchOf(n.id);
+      branchTimeMs.set(b, (branchTimeMs.get(b) ?? 0) + (n.activeMs ?? 0));
+    }
+
     return this.state.nodes
       .filter(
-        (n) => n.treeId === treeId && n.status !== "done" && n.id !== rootId
+        (n) =>
+          n.treeId === treeId &&
+          n.status !== "done" &&
+          n.id !== rootId &&
+          // Visited since it last needed attention — keep it out of the list
+          // until it goes idle awaiting a prompt again (which un-acknowledges).
+          !(n.acknowledged && !n.waiting && !n.urgent)
       )
       .map((n) => {
         const ageDays = (now - n.lastActiveAt) / 86_400_000;
         let score = n.relevance * 30 + Math.min(ageDays, 14) * 3;
+        // Weight tasks in workflows the developer has invested more time in
+        // (capped so a single long session can't dominate everything).
+        const branchMin = (branchTimeMs.get(branchOf(n.id)) ?? 0) / 60_000;
+        score += Math.min(branchMin, 120) * 0.5;
         let reason = "Important";
         if (n.urgent) {
           score += 100;
           reason = "Urgent";
+        } else if (n.waiting) {
+          score += 60;
+          // Longest-waiting sessions rank first.
+          const waitMin = n.waitingSince ? (now - n.waitingSince) / 60_000 : 0;
+          score += Math.min(waitMin, 240) * 0.5;
+          reason = "Waiting on you";
+          if (n.awaitingChoice) {
+            // Quick to re-prompt (just pick/confirm) — a light nudge up.
+            score += 15;
+            reason = "Quick: pick an option";
+          }
         } else if (n.type === "session") {
           score += 40;
           reason = "Session needs follow-up";

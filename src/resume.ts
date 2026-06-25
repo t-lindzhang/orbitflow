@@ -53,3 +53,55 @@ async function openFile(
     );
   }
 }
+
+/**
+ * Best-effort: open the Copilot chat session a node was derived from.
+ * `sourceId` has the form `chat:<sessionId>.jsonl`. Local chat sessions are
+ * addressable as editors via the `vscode-chat-session` scheme, so we rebuild
+ * that resource (mirroring VS Code's `LocalChatSessionUri.forSession`) and open
+ * it. Falls back to focusing the chat surface when the specific session can't
+ * be opened. Returns true when a chat surface was shown.
+ */
+export async function revealChatSession(sourceId: string): Promise<boolean> {
+  const sessionId = sourceId
+    .replace(/^chat:/, "")
+    .replace(/\.jsonl$/i, "");
+
+  // vscode-chat-session://local/<base64url(sessionId)>
+  const encodedId = Buffer.from(sessionId, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  const sessionUri = vscode.Uri.from({
+    scheme: "vscode-chat-session",
+    authority: "local",
+    path: "/" + encodedId,
+  });
+  try {
+    await vscode.commands.executeCommand("vscode.open", sessionUri);
+    return true;
+  } catch {
+    /* fall through to focusing the chat surface */
+  }
+
+  // Otherwise just reveal the chat surface so the thread can be picked up.
+  const available = new Set(await vscode.commands.getCommands(true));
+  const focusCandidates = [
+    "workbench.panel.chat.view.copilot.focus",
+    "workbench.action.chat.open",
+    "workbench.action.openChat",
+    "workbench.panel.chat.view.focus",
+  ];
+  for (const id of focusCandidates) {
+    if (available.has(id)) {
+      try {
+        await vscode.commands.executeCommand(id);
+        return true;
+      } catch {
+        /* try the next candidate */
+      }
+    }
+  }
+  return false;
+}
