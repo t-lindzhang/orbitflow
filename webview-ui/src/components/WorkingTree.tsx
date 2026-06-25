@@ -22,6 +22,7 @@ const DEPTH_THRESHOLD = 3;
 
 export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: WorkingTreeProps) {
   const [hoveredNode, setHoveredNode] = useState<PositionedNode | null>(null);
+  const [selectedNode, setSelectedNode] = useState<PositionedNode | null>(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
@@ -169,7 +170,7 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
               key={pn.id}
               className={`tree-node ${pn.node.state} ${isUrgent ? 'urgent' : ''}`}
               style={{ filter: !isActive ? `saturate(${saturation})` : undefined }}
-              onClick={() => onResumeNode(pn.id)}
+              onClick={() => setSelectedNode(pn)}
               onMouseEnter={() => setHoveredNode(pn)}
               onMouseLeave={() => setHoveredNode(null)}
             >
@@ -185,11 +186,18 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
         </g>
       </svg>
 
-      {/* Zoom Controls */}
-      <div className="zoom-controls">
-        <button onClick={handleZoomIn} title="Zoom in">+</button>
-        <button onClick={handleZoomOut} title="Zoom out">−</button>
-        <button onClick={handleZoomReset} title="Reset zoom">⤢</button>
+      {/* Bottom bar: zoom controls + legend */}
+      <div className="bottom-bar">
+        <div className="zoom-controls">
+          <button onClick={handleZoomIn} title="Zoom in">+</button>
+          <button onClick={handleZoomOut} title="Zoom out">−</button>
+          <button onClick={handleZoomReset} title="Reset zoom">⤢</button>
+        </div>
+        <div className="legend">
+          <span className="legend-item"><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Task</span>
+          <span className="legend-item"><svg width="12" height="12"><rect x="1" y="1" width="10" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Session</span>
+          <span className="legend-item"><svg width="12" height="12"><polygon points="6,1 1,11 11,11" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Idea</span>
+        </div>
       </div>
 
       {/* Minimap */}
@@ -238,8 +246,17 @@ export function WorkingTree({ state, onSelectNode, onResumeNode, onPruneNode }: 
         </div>
       )}
 
-      {/* Preview Card (anchored near node) */}
-      {hoveredNode && <PreviewCard node={hoveredNode} />}
+      {/* Preview Card (on hover) */}
+      {hoveredNode && !selectedNode && <PreviewCard node={hoveredNode} />}
+
+      {/* Sticky Node Card (on click — does NOT auto-resume) */}
+      {selectedNode && (
+        <StickyNodeCard
+          node={selectedNode}
+          onResume={() => { onResumeNode(selectedNode.id); setSelectedNode(null); }}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
     </div>
   );
 }
@@ -322,10 +339,47 @@ function PreviewCard({ node }: { node: PositionedNode }) {
   );
 }
 
+function StickyNodeCard({ node, onResume, onClose }: {
+  node: PositionedNode;
+  onResume: () => void;
+  onClose: () => void;
+}) {
+  const timeAgo = getTimeAgo(node.node.startedAt);
+  const stateLabel = node.node.state === 'active' ? 'Active Now'
+    : node.node.state === 'stale' ? 'Stale' : 'Recent';
+  const typeLabel = node.task.nodeType === 'session' ? '⬜ Session'
+    : node.task.nodeType === 'idea' ? '🔺 Idea' : '⭕ Task';
+
+  return (
+    <div className="sticky-card" onClick={(e) => e.stopPropagation()}>
+      <div className="sticky-card-header">
+        <span className="sticky-card-title">{node.task.name}</span>
+        <button className="sticky-card-close" onClick={onClose}>×</button>
+      </div>
+      <div className="sticky-card-meta">
+        <span>🕐 {timeAgo}</span>
+        <span>{typeLabel}</span>
+        <span className={`card-status ${node.node.state}`}>{stateLabel}</span>
+      </div>
+      <div className="sticky-card-files">
+        {node.task.files.length > 0
+          ? node.task.files.slice(0, 3).map((f, i) => (
+              <span key={i} className="file-tag">{getFileName(f)}</span>
+            ))
+          : <span className="file-tag">No files yet</span>
+        }
+      </div>
+      <div className="sticky-card-actions">
+        <button className="sticky-resume-btn" onClick={onResume}>▶ Resume</button>
+      </div>
+    </div>
+  );
+}
+
 // Layout algorithm
 function layoutTree(state: FocusTreeState, rootId: string): PositionedNode[] {
   const result: PositionedNode[] = [];
-  const HORIZONTAL_SPACING = 100;
+  const HORIZONTAL_SPACING = 160;
   const VERTICAL_SPACING = 130;
 
   function getSubtreeWidth(nodeId: string): number {

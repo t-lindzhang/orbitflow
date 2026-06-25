@@ -6,7 +6,7 @@ import { PriorityList } from './components/PriorityList';
 import './styles/sidebar.css';
 
 function SidebarApp() {
-  const { state, sendMessage } = useVSCodeAPI();
+  const { state, sendMessage, userTasks, saveUserTasks } = useVSCodeAPI();
 
   const handleSelectNode = (nodeId: string) => {
     sendMessage('selectNode', { nodeId });
@@ -25,24 +25,26 @@ function SidebarApp() {
       <div className="sidebar-section">
         <h3 className="section-title">Focus Tree</h3>
         {state && state.rootNodeId ? (
-          <CompactTree state={state} onSelectNode={handleSelectNode} />
+          <CompactTree state={state} onSelectNode={handleResume} />
         ) : (
           <div className="empty-state">
             Open a file to start building your focus tree...
           </div>
         )}
+        <div className="legend-compact">
+          <span><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg> Task</span>
+          <span><svg width="10" height="10"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg> Session</span>
+          <span><svg width="10" height="10"><polygon points="5,1 1,9 9,9" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg> Idea</span>
+        </div>
       </div>
 
       <div className="sidebar-divider" />
 
       <div className="sidebar-section">
         <h3 className="section-title">Priorities</h3>
-        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} compact />
+        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} compact
+          savedTasks={userTasks} onTasksChange={saveUserTasks} />
       </div>
-
-      <button className="expand-btn" onClick={handleOpenFullView}>
-        ⤢ Open Full View
-      </button>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { PriorityList } from './components/PriorityList';
 import './styles/fullview.css';
 
 function FullViewApp() {
-  const { state, sendMessage } = useVSCodeAPI();
+  const { state, sendMessage, userTasks, saveUserTasks } = useVSCodeAPI();
 
   const handleSelectNode = (nodeId: string) => {
     sendMessage('selectNode', { nodeId });
@@ -18,6 +18,10 @@ function FullViewApp() {
 
   const handlePrune = (nodeId: string) => {
     sendMessage('pruneSubtree', { nodeId });
+  };
+
+  const handleEditNode = (nodeId: string, title?: string, detail?: string) => {
+    sendMessage('editNode', { nodeId, title, detail });
   };
 
   return (
@@ -41,7 +45,8 @@ function FullViewApp() {
 
       <div className="fullview-checklist-panel">
         <h2 className="panel-title">Priorities</h2>
-        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume} />
+        <PriorityList state={state} onSelectNode={handleSelectNode} onResume={handleResume}
+          savedTasks={userTasks} onTasksChange={saveUserTasks} />
       </div>
     </div>
   );

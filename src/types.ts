@@ -49,11 +49,20 @@ export type InboundMessage =
   | { type: "pruneSubtree"; nodeId: string }
   | { type: "toggleDone"; nodeId: string }
   | { type: "select"; nodeId: string }
+  | { type: "editNode"; nodeId: string; title?: string; detail?: string }
   | { type: "revert" }
   | { type: "generateTrees" }
   | { type: "reorganize" }
   | { type: "clearAll" }
-  | { type: "openGraph" };
+  | { type: "openGraph" }
+  | { type: "saveUserTasks"; tasks: UserTask[] }
+  | { type: "loadUserTasks" };
+
+export interface UserTask {
+  id: string;
+  text: string;
+  done: boolean;
+}
 
 /** Messages: extension -> webview */
 export interface PriorityItem {

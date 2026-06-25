@@ -3,29 +3,37 @@ import { FocusTreeState } from '../types';
 
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void;
-  getState(): FocusTreeState | undefined;
-  setState(state: FocusTreeState): void;
+  getState(): any;
+  setState(state: any): void;
 };
 
 const vscode = acquireVsCodeApi();
 
+interface PersistedState {
+  treeState: FocusTreeState | null;
+  userTasks: { id: string; text: string; done: boolean }[];
+}
+
 export function useVSCodeAPI() {
-  // Restore from VS Code's webview state persistence
-  const [state, setState] = useState<FocusTreeState | null>(
-    vscode.getState() || null
-  );
+  const persisted: PersistedState = vscode.getState() || { treeState: null, userTasks: [] };
+  
+  const [state, setState] = useState<FocusTreeState | null>(persisted.treeState);
+  const [userTasks, setUserTasks] = useState<{ id: string; text: string; done: boolean }[]>(persisted.userTasks || []);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       const message = event.data;
-      // Handle both OrbitFlow format and our format
       if (message.type === 'stateUpdate' || message.type === 'state') {
         const newState = message.state;
         const priority = message.priority || [];
-        // Convert OrbitFlow state to our format if needed
         const converted = convertState(newState, priority);
         setState(converted);
-        vscode.setState(converted);
+        vscode.setState({ treeState: converted, userTasks });
+      } else if (message.type === 'userTasks') {
+        // Restore user tasks from extension backend
+        const tasks = message.tasks || [];
+        setUserTasks(tasks);
+        vscode.setState({ treeState: state, userTasks: tasks });
       }
     };
     window.addEventListener('message', handler);
@@ -60,12 +68,21 @@ export function useVSCodeAPI() {
       vscode.postMessage({ type: 'pruneSubtree', nodeId: data?.nodeId });
     } else if (command === 'toggleDone') {
       vscode.postMessage({ type: 'toggleDone', nodeId: data?.nodeId });
+    } else if (command === 'editNode') {
+      vscode.postMessage({ type: 'editNode', nodeId: data?.nodeId, title: data?.title, detail: data?.detail });
     } else {
       vscode.postMessage({ type: command, ...data });
     }
   }, []);
 
-  return { state, sendMessage };
+  const saveUserTasks = useCallback((tasks: { id: string; text: string; done: boolean }[]) => {
+    setUserTasks(tasks);
+    vscode.setState({ treeState: state, userTasks: tasks });
+    // Persist to extension workspaceState (survives restarts)
+    vscode.postMessage({ type: 'saveUserTasks', tasks });
+  }, [state]);
+
+  return { state, sendMessage, userTasks, saveUserTasks };
 }
 
 // Convert OrbitFlow state format to our FocusTreeState format
@@ -86,10 +103,15 @@ function convertState(orbitState: any, priority: any[] = []): FocusTreeState {
 
   for (const tn of thoughtNodes) {
     // Create a Task from the ThoughtNode
+    // Only show the active file (the one being edited when node was created)
+    const activeFile = tn.snapshot?.files?.find((f: any) => f.active);
+    const nodeFiles = activeFile ? [activeFile.path] : 
+      (tn.snapshot?.files?.slice(0, 1).map((f: any) => f.path) || []);
+    
     tasks[tn.id] = {
       id: tn.id,
       name: tn.title || '?',
-      files: tn.snapshot?.files?.map((f: any) => f.path) || [],
+      files: nodeFiles,
       createdAt: tn.lastActiveAt || Date.now(),
       totalTimeSpent: 0,
       lastCodeSnapshot: null,
