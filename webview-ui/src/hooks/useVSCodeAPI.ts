@@ -114,11 +114,6 @@ function convertState(orbitState: any, priority: any[] = []): FocusTreeState {
         : (Date.now() - (tn.lastActiveAt || 0) > 30 * 60 * 1000) ? 'stale'
         : 'recent',
     };
-
-    // Find root (no parent)
-    if (!tn.parentId) {
-      rootNodeId = tn.id;
-    }
   }
 
   // Get tree base color
@@ -126,6 +121,23 @@ function convertState(orbitState: any, priority: any[] = []): FocusTreeState {
   const activeTreeId = orbitState.activeTreeId;
   const activeTree = trees.find((t: any) => t.id === activeTreeId) || trees[0];
   const baseColor = activeTree?.baseColor || '#b44dff';
+
+  // Choose the root to render. There can be more than one parentless node
+  // (e.g. a transient duplicate tree); prefer the root of the active tree,
+  // otherwise the root whose subtree contains the most nodes — never just
+  // the last one in the array, which may be an empty duplicate.
+  const roots = thoughtNodes.filter(n => !n.parentId);
+  if (roots.length > 0) {
+    const subtreeSize = (id: string): number =>
+      1 + thoughtNodes
+        .filter(n => n.parentId === id)
+        .reduce((sum, c) => sum + subtreeSize(c.id), 0);
+    const inActiveTree = roots.find(n => n.treeId === activeTreeId);
+    rootNodeId = (inActiveTree
+      ? inActiveTree
+      : [...roots].sort((a, b) => subtreeSize(b.id) - subtreeSize(a.id))[0]
+    ).id;
+  }
 
   return { tasks, nodes, rootNodeId, activeNodeId, priority, baseColor };
 }
