@@ -4,6 +4,10 @@
 
 OrbitFlow was built for the Intern Hackathon 2026. It is designed for developers — especially neurodivergent developers — who lose their place when they get interrupted, switch contexts, or fall down a rabbit hole. Instead of asking you to manually track your work, OrbitFlow watches your activity (code changes, commits, and Copilot chat sessions) and automatically builds a visual **memory tree** of what you've been doing, so you can pick up exactly where you left off.
 
+![Worktree Example](img/Worktree%20Example.png)
+
+
+
 ## What it does
 
 OrbitFlow runs quietly in the background and:
@@ -65,11 +69,17 @@ OrbitFlow appears as an icon in the Activity Bar. It has **two views of the same
 - **Nodes** are the units of a train of thought — a task step, a chat thread, or an idea.
 - The tree grows on its own as you work; you rarely need to edit it by hand.
 
+![Worktree Example](img/Worktree%20Example%202.png)
+
 ### Resuming work
 
 - **Hover** a node (in either view) to see a preview with its details, type, time since last active, and the files involved.
 - **Click** a node to jump back to it: OrbitFlow reopens the files the task touched (jumping to the line you were on and surfacing your last terminal command), or reopens the related Copilot chat session for chat-derived nodes.
 - For a full restore from the priority list, use the **▶ resume** button — it reopens files, jumps to the line, and replays recent terminal history.
+
+
+<img src="img/Resume.png" alt="Resume" width="400" />
+
 
 ### Editing the tree (full editor view)
 
@@ -98,6 +108,9 @@ A separate, linear view that cuts through the tree and shows only what matters r
 - **Stale-but-important** tasks you may have abandoned.
 
 You can also add your own manual to-do items to this list.
+
+<img src="img/Priorities.png" alt="Resume" width="350" />
+
 
 ## What the symbols mean
 
